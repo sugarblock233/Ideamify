@@ -1,0 +1,205 @@
+/** Pure, deterministic main-tree layout (SPEC 2.4 / 2.5).
+
+Input to layout is ONLY the main tree: `parent_id`, sibling `order_index` and
+the fold set. Cross-branch relations NEVER enter this module. The same
+(tree, order, folds) must always yield the same coordinates, and content
+edits (title/summary/status/evidence/relations) never relayout — callers
+only rerun this when the tree structure or folds change.
+
+Per SPEC 2.4: `tree().nodeSize([176, 380])` with d3's axes swapped for a
+left-to-right canvas, then half the card size subtracted for top-left
+coordinates. Verified against d3-hierarchy 3.1.2 source
+(`node.y = depth * dy`): d3.x is the sibling axis, d3.y the depth axis.
+
+    canvasX = d3.y - CARD_W / 2
+    canvasY = d3.x - CARD_H / 2
+*/
+
+import { hierarchy, tree, type HierarchyNode, type HierarchyPointNode } from "d3-hierarchy";
+import type { GraphNode } from "./types";
+
+export const CARD_W = 280;
+export const CARD_H = 144;
+/** [siblingGap, depthGap]; depth gap > card width so connectors fit. */
+export const NODE_SIZE: [number, number] = [176, 380];
+export const rootIdOf = (pid: string) => `project:${pid}`;
+
+export interface PlacedNode {
+  id: string;
+  x: number; // top-left canvas coordinate
+  y: number;
+  width: number;
+  height: number;
+  /** number of hidden (folded or branch-filtered) direct children */
+  hiddenCount: number;
+  depth: number;
+}
+
+export interface LayoutResult {
+  positions: Map<string, PlacedNode>;
+  rootId: string;
+  /** ids of visible (non-root) nodes */
+  visibleIds: Set<string>;
+}
+
+interface TreeLeaf {
+  id: string;
+  parent: string | null;
+  hiddenDirect: number;
+  children?: TreeLeaf[];
+}
+
+interface D3Node {
+  id: string;
+  hidden: number;
+  children?: D3Node[];
+}
+
+/** Build d3 hierarchy input from the flat graph rows.
+
+A node is visible when it is (a) inside `branchRoot`'s subtree (if set) and
+(b) not under a folded ancestor. Folding a node keeps the node itself
+visible but hides its whole subtree; hidden direct children are counted for
+the fold handle. */
+export function buildTreeData(
+  nodes: GraphNode[],
+  folds: ReadonlySet<string>,
+  branchRoot: string | null,
+): { root: TreeLeaf | null; visibleIds: Set<string> } {
+  const byId = new Map<string, GraphNode>();
+  for (const n of nodes) byId.set(n.id, n);
+  if (byId.size === 0) return { root: null, visibleIds: new Set() };
+
+  // (a) allowed subtree when branch-focusing
+  let allowed: Set<string> | null = null;
+  if (branchRoot && byId.has(branchRoot)) {
+    allowed = new Set<string>([branchRoot]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const n of byId.values()) {
+        if (n.parent_id && allowed.has(n.parent_id) && !allowed.has(n.id)) {
+          allowed.add(n.id);
+          grew = true;
+        }
+      }
+    }
+  }
+
+  const foldedAncestor = (id: string): boolean => {
+    let cur = byId.get(id)?.parent_id ?? null;
+    while (cur) {
+      if (folds.has(cur)) return true;
+      cur = byId.get(cur)?.parent_id ?? null;
+    }
+    return false;
+  };
+  const visibleOf = (n: GraphNode): boolean =>
+    (!allowed || allowed.has(n.id)) && !foldedAncestor(n.id);
+
+  const kidsOf = new Map<string, GraphNode[]>();
+  for (const n of byId.values()) {
+    if (!n.parent_id || !byId.has(n.parent_id)) continue;
+    const list = kidsOf.get(n.parent_id) ?? [];
+    list.push(n);
+    kidsOf.set(n.parent_id, list);
+  }
+  for (const kids of kidsOf.values()) {
+    // canonical sibling order (SPEC 2.4): (order_index, id)
+    kids.sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id));
+  }
+
+  const isTopOfVisibleTree = (n: GraphNode): boolean =>
+    // In branch-focus mode the branch root itself is the top of the shown
+    // tree ( drawn as a first-level card; the breadcrumb exposes its place).
+    branchRoot ? n.id === branchRoot : n.parent_id === null;
+
+  const visibleTops = [...byId.values()]
+    .filter((n) => isTopOfVisibleTree(n) && visibleOf(n))
+    .sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id));
+  if (visibleTops.length === 0) return { root: null, visibleIds: new Set() };
+
+  const mk = (n: GraphNode): TreeLeaf => {
+    const kids = kidsOf.get(n.id) ?? [];
+    const leaves = kids.filter(visibleOf).map(mk);
+    return {
+      id: n.id,
+      parent: n.parent_id,
+      hiddenDirect: kids.length - leaves.length,
+      children: leaves.length ? leaves : undefined,
+    };
+  };
+
+  const visible = new Set<string>();
+  const go = (l: TreeLeaf): void => {
+    visible.add(l.id);
+    for (const c of l.children ?? []) go(c);
+  };
+  for (const t of visibleTops) go(mk(t));
+
+  const root: TreeLeaf = {
+    id: "root",
+    parent: null,
+    hiddenDirect: 0,
+    children: visibleTops.map(mk),
+  };
+  return { root, visibleIds: visible };
+}
+
+export function computeLayout(
+  projectId: string,
+  nodes: GraphNode[],
+  folds: ReadonlySet<string>,
+  branchRoot: string | null,
+): LayoutResult {
+  const rootId = rootIdOf(projectId);
+  const empty: LayoutResult = { positions: new Map(), rootId, visibleIds: new Set() };
+  if (nodes.length === 0) return empty;
+
+  const { root, visibleIds } = buildTreeData(nodes, folds, branchRoot);
+  if (!root) return empty;
+
+  const toD3 = (l: TreeLeaf): D3Node => ({
+    id: l.id,
+    hidden: l.hiddenDirect,
+    children: (l.children ?? []).map(toD3),
+  });
+
+  const hRoot = hierarchy<D3Node>(
+    { id: rootId, hidden: 0, children: (root.children ?? []).map(toD3) },
+    (d) => d.children,
+  );
+  // Children are pre-sorted to (order_index, id); d3 preserves that order.
+  tree<D3Node>().nodeSize(NODE_SIZE)(hRoot);
+
+  const positions = new Map<string, PlacedNode>();
+  const walk = (h: HierarchyNode<D3Node>): void => {
+    // tree() (TypedHierarchyPointNode) always fills x/y by the time it has
+    // run; the narrow cast documents that contract.
+    const p = h as HierarchyPointNode<D3Node>;
+    positions.set(p.data.id, {
+      id: p.data.id,
+      x: p.y - CARD_W / 2,
+      y: p.x - CARD_H / 2,
+      width: CARD_W,
+      height: CARD_H,
+      hiddenCount: p.data.hidden,
+      depth: p.depth,
+    });
+    for (const c of h.children ?? []) walk(c);
+  };
+  walk(hRoot);
+
+  return { positions, rootId, visibleIds };
+}
+
+/** Overlap predicate used by layout unit tests (T02 cards must not overlap). */
+export function cardsOverlap(a: PlacedNode, b: PlacedNode): boolean {
+  if (a.id === b.id) return false;
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
+}

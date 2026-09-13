@@ -1,0 +1,15 @@
+node_modules/
+frontend/dist/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+!data/.gitkeep
+config/
+test-results/
+playwright-report/
+.env
+*.log
+.DS_Store

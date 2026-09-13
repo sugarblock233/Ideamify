@@ -1,0 +1,26 @@
+# ResearchMap v0.1 — 单容器部署（SPEC：一个容器 + 一个持久卷）
+#
+#   1) cp .env.example .env   # 改 RESEARCHMAP_TOKENS 里两个令牌
+#   2) docker compose up -d --build
+#   3) 打开 http://localhost:8000/  → 登录界面输入令牌
+#
+# 数据只在卷 researchmap-data 上（SQLite /data/researchmap.db）。
+
+services:
+  researchmap:
+    build: .
+    image: researchmap:0.1
+    ports:
+      - "${RESEARCHMAP_PORT:-8000}:8000"
+    environment:
+      RESEARCHMAP_DB: /data/researchmap.db
+      # 内联 JSON：{token_name: bearer_token}，每个令牌 ≥12 个字符；
+      # token_name 就是提交记录里的 actor 身份。
+      RESEARCHMAP_TOKENS: ${RESEARCHMAP_TOKENS:?必须在 .env 中设置 RESEARCHMAP_TOKENS（内联 JSON）}
+      RESEARCHMAP_STATIC: /app/frontend-dist
+    volumes:
+      - researchmap-data:/data
+    restart: unless-stopped
+
+volumes:
+  researchmap-data:

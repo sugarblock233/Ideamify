@@ -1,0 +1,37 @@
+"""Pytest entry for the 61-check ASGI smoke suite (tests/api_smoke.py).
+
+Environment is configured here **before** the app is first imported, so the
+SQLite engine binds to a per-test temp database. The smoke script prints one
+PASS/FAIL line per check and exits non-zero on any failure.
+"""
+
+import contextlib
+import io
+import runpy
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+TOKENS = '{"researcher": "researcher-token-0001", ' \
+         '"ai-sim": "ai-sim-token-0001"}'
+
+
+def test_api_smoke(tmp_path, monkeypatch):
+    # Values must match the TOK table inside api_smoke.py (auth checks).
+    monkeypatch.setenv("RESEARCHMAP_DB", str(tmp_path / "api_smoke.db"))
+    monkeypatch.setenv("RESEARCHMAP_TOKENS", TOKENS)
+    monkeypatch.setenv("RESEARCHMAP_STATIC", "")
+    monkeypatch.delenv("RESEARCHMAP_CORS_ORIGINS", raising=False)
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            runpy.run_path(str(HERE / "api_smoke.py"), run_name="__main__")
+            rc = 0
+        except SystemExit as e:
+            rc = int(e.code or 0)
+    out = buf.getvalue()
+
+    assert rc == 0, out
+    assert "FAIL" not in out, out
+    assert "61/61 passed" in out, out
