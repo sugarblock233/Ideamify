@@ -111,3 +111,66 @@ items (B01–B06):
   exposes the API on all host interfaces out of the box. The token model is
   otherwise unchanged (single trusted circle, token names are actor
   identities); read `SECURITY.md`.
+
+### 2026-09-14 — second acceptance round (R01–R10)
+
+The second audit rejected several first-round "fixed and verified" claims and
+reproduced the defects in a real browser/CLI environment. This batch fixes each
+item and re-verifies it with real commands, browsers, and a 1104-node stress
+project. Per-item status, evidence, and the corrections to the earlier record
+live in `docs/implementation-results.md`.
+
+#### Fixed
+
+- **R01** — every path that truly leaves the workspace ("exit", "new project")
+  now asks before discarding a dirty draft; cancelling keeps every draft field
+  byte-for-byte and does not open the project dialog.
+- **R02** — same-field conflicts show all three versions (read-time / your
+  draft / server) with per-field resolution, and saving is blocked until each
+  one is answered. A refresh can no longer drop an undecided conflict: the
+  post-commit sync used to re-merge against the new baseline, silently clear
+  the list, and re-enable save — one click away from overwriting a teammate.
+- **R03** — large maps first open anchored on the root at a readable zoom
+  (1104-node project: 0.7 / 196px cards / 9.8px rendered titles, 8 cards fully
+  in view at 1440×900) instead of a bounding-box fit forced to 0.4 (112px
+  cards, ~5px text). The minimap renders again — controlled `nodes` never
+  wrote `node.measured`, so every node was skipped.
+- **R04** — the two failing e2e tests were fixed at the root (ambiguous
+  locators scoped to their container; the right-click target scrolled into
+  view first) — no force clicks, no raised timeouts, no skips. 19 e2e tests
+  now pass on three consecutive fresh databases.
+- **R05** — the context character budget is enforced on the response that
+  actually ships, measured after warnings/continuations/omitted-counts are
+  written; a budget too small even for the skeleton returns
+  `422 CONTEXT_BUDGET_TOO_SMALL` with the minimum usable value.
+- **R06** — identity-writeback notes are buffered and merged into the failure
+  object, so any failing CLI invocation still emits exactly one JSON object on
+  stderr.
+- **R07** — Markdown context prints scope/finding/decision for every item
+  (not just `focus`) and carries the `data_notice`.
+- **R08** — `backup.py verify` examples use the real positional argument; the
+  `--dry-run` documentation states that missing identity fields are written
+  back in any mode; the in-app AI access dialog shows directly runnable
+  commands and describes all four 409 codes (`REVISION_CONFLICT` locks the
+  whole project revision, not "the same object").
+- **B04** (found while re-verifying) — an archived node can be found and
+  restored from the browser: `graph?include_archived=true`, a top-bar toggle,
+  archived card styling, and a restore action with a required reason. Before
+  this, archiving was irreversible from the UI.
+
+#### Changed
+
+- Every `uses:` in the CI workflow is pinned to a 40-character commit SHA
+  verified through the GitHub API, each with a readable version comment; the
+  Markdown link check also covers `docs/AI_USAGE.zh-CN.md`.
+- License (MIT, `sugarblock233`), security contact (GitHub Issues/
+  Discussions), and the final project name (Ideamify) are settled and applied.
+- Commits in this batch carry no `Co-Authored-By` trailer, per `AGENTS.md`.
+  The 15 pre-existing commits that do are left untouched; rewriting shared
+  history is the owner's decision.
+
+#### Security
+
+- The CI credential scan reports only file and line numbers. It previously
+  echoed the matched line, which would have republished the very secret the
+  scan exists to keep out of a public log.
