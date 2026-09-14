@@ -203,3 +203,33 @@ export function cardsOverlap(a: PlacedNode, b: PlacedNode): boolean {
     b.y < a.y + a.height
   );
 }
+
+/** First-open default fold set (SPEC 3.1 / A03): when no saved view exists,
+ *  show only the virtual root plus the first two business levels. Every node
+ *  at depth ≥ 2 that has children is folded, so its subtree (depth ≥ 3) is
+ *  hidden but still expandable. Depth 1 = top-level routes (parent null). */
+export function initialFolds(nodes: GraphNode[]): Set<string> {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const depth = new Map<string, number>();
+  const depthOf = (start: GraphNode): number => {
+    const hit = depth.get(start.id);
+    if (hit !== undefined) return hit;
+    let cur: GraphNode | undefined = start;
+    const seen = new Set<string>([start.id]);
+    let steps = 1;
+    // Walk up to the top-level ancestor; repeats (impossible on a persisted
+    // acyclic main tree) or unknown parents terminate the walk safely.
+    while (cur && cur.parent_id && !seen.has(cur.parent_id)) {
+      seen.add(cur.parent_id);
+      steps++;
+      cur = byId.get(cur.parent_id);
+    }
+    depth.set(start.id, steps);
+    return steps;
+  };
+  const out = new Set<string>();
+  for (const n of nodes) {
+    if (n.parent_id && n.child_count > 0 && depthOf(n) >= 2) out.add(n.id);
+  }
+  return out;
+}
