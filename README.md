@@ -25,6 +25,14 @@ read and update the same record, so a new session can pick up where you left off
   tools; zoom-driven density tiers (reading / compact / overview) and a
   low-interference mode; a resizable, collapsible detail panel; interface
   in Chinese or English.
+- Write directly on the map (new): + route / + child open a draft card beside
+  the parent; nothing is committed until you save, and a failed save keeps
+  the draft for an idempotent retry.
+- Markdown tables and managed images (new): insert GFM tables in node
+  details; insert or paste images that upload as managed attachments and
+  render inline with click-to-zoom. Images are served only through an
+  authenticated endpoint (the token never appears in an image URL), and
+  external image URLs are never fetched.
 
 The app displays the name **ResearchMap**.
 Ideamify is the repository name; the CLI and `RESEARCHMAP_*` configuration

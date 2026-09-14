@@ -242,6 +242,32 @@ SPEC 未规定、实现中被迫选定的事，逐条记在这里（含理由与
   旧 E2E 选择器无需改名即通过；`forceOpen` 拉起已收起的详情面板承载
   草稿表单（收起面板的 overflow 裁剪会让 Playwright 误判可点击）。
 
+## 18. 受管图片附件：引用语法、认证字节流、staged/attached 生命周期（D 批 §9）
+- **引用语法 = 纯 Markdown 源**：正文里附件写作 `![alt](attachment:<uuid>)`，
+  剪贴板复制、导出、全文搜索全部可用；`attachment:` scheme 语法上不与
+  真实 URL 冲突。渲染走分段（`lib/attachments.ts`）：正文段照常过净化器
+  （`<img>` 仍在 FORBID_TAGS），附件段由 `AttachmentImage` 组件经
+  **Authorization 头**取 `GET /attachments/{id}` 字节 → `objectURL` 渲染。
+  **Bearer 令牌永不出现在 `<img>` URL**（页面内存令牌语义 §9 不破）。
+- **外链图片一律不加载**：`![x](https://…)` 降为占位条、只显示 URL 文本
+  （承接「不提供任何外链预览/探测面」边界）；`data:` 等其他 scheme 同样
+  不进渲染。外链「点击加载」显式不做。
+- **两态生命周期**：上传即 `staged`（同项目同 sha256 幂等去重），提交事务
+  内扫描 node.create/node.update 的 details_md + evidence 引用 →
+  同事务翻转 `attached`（**node.update 的字段在 `.fields` 里——首轮实现
+  漏扫，e2e 抓出后已修**）；attached 永不删（不可变内容，替换=新 id），
+  staged 且无节点引用超 30 天在上传事务顺带 GC（无后台线程）。
+- **限宽闸口**：2MiB 全局 body 闸仅对上传路径正则豁免；单文件 ≤10MB、
+  Pillow 探尺寸 ≤8000px、类型必须 image/* 全部在**路由内显式校验**，
+  不放宽其他端点。
+- **出口三件套**：export 升 `schema_version: 2` 带附件元数据（字节不入
+  JSON——随备份包走）；backup 把字节按 manifest（逐文件 sha256 记账，
+  缺失/损坏只记不中断）拷入 `<out>/attachments/`；CLI 只提供只读列表
+  子命令——**写入通道只有 UI/API**（stdlib 手写 multipart 收益低）。
+- **部署面**：字节目录 `RESEARCHMAP_STORAGE`（默认 `<db dir>/attachments`，
+  与库同卷；Docker 指到同一 /data 卷即随备份带走）。测试用 multipart
+  边界不带前导连字符（python-multipart 对 `--xxx` 形状的头值偶发解析偏移）。
+
 ## 验收状态（2026-09-14，Docker 补验后无未验证项）
 
 - **容器验证已补做（2026-09-14）**：开发环境已具备 Docker

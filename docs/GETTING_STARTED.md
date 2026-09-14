@@ -60,7 +60,23 @@ failed save (offline or a revision conflict) keeps the draft as it was, with
 the error shown in the panel — retry straight away. No matter how many times
 one draft is retried, it produces exactly one commit and one new card.
 
-## 4. Continue without erasing what you learned
+## 4. Tables and images in node details
+
+The details body is Markdown. **插入表格** in the editor toolbar inserts an
+editable row/column table template; wide tables scroll horizontally inside
+the container in the read view instead of breaking the card.
+
+**插入图片** picks a local image, or paste a screenshot straight into the
+body textarea — images upload as managed attachments, referenced in the
+markdown as `![name](attachment:…)`. They render inline in the read and
+preview views and can be clicked to zoom. Images are served only through an
+authenticated endpoint (the token never appears in an image URL); external
+`https://` images are never loaded and degrade to a placeholder showing the
+URL text. Cancelling a draft after uploading leaves no referenced record;
+unreferenced uploads are cleaned up after 30 days, while saved references
+never get deleted.
+
+## 5. Continue without erasing what you learned
 
 Keep the original negative result. Create a child node for the revised idea:
 “Expand keywords only for low-recall questions.” Different attempts can have
@@ -71,7 +87,7 @@ The **关联** tab links work across branches. The **历史** tab shows the sele
 node's commits and before/after changes. Search finds earlier work by title,
 summary, tags, finding or decision. A card's right-click menu can copy a node link.
 
-## 5. Views and layouts
+## 6. Views and layouts
 
 Above the map sits a row of view tools (these settings live only in this
 browser; they are never part of the research record):
@@ -90,7 +106,7 @@ browser; they are never part of the research record):
 - **Language**: 中文 / English from the top-bar ⋯ menu; content and API
   fields are never translated.
 
-## 6. Hand the record to your AI
+## 7. Hand the record to your AI
 
 Use **⋯ → AI 接入说明** to get the server address, project ID and command examples.
 Configure the AI's separate token in its terminal environment, then give it
@@ -110,7 +126,7 @@ be able to run the [CLI](../tools/researchmap.py) with Python 3 and reach the
 same server. `localhost` on another computer is that other computer, not
 this instance; arrange a trusted connection before using a remote AI tool.
 
-## 7. Review the update and finish the session
+## 8. Review the update and finish the session
 
 Use the app's **刷新** or **载入更新** button. Review the new node and history;
 the AI token's name should appear as the actor. Concurrent edits to the same

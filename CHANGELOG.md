@@ -8,6 +8,22 @@ migration steps will be noted here.
 
 ### Added
 
+- Markdown **tables** in node details: GFM table rendering with a
+  container-scoped horizontal scroll for wide tables, and an「插入表格」
+  template button in the editor.
+- **Managed image attachments**: insert or paste images into node details;
+  they upload as staged attachments and become attached when the edit
+  commits. Images render inline in the read view and editor preview, with a
+  click-to-zoom lightbox. Bytes are served only through an authenticated
+  endpoint — the bearer token never appears in an image URL. External
+  `https://` images are never loaded; they degrade to a placeholder showing
+  the URL text. Unreferenced staged uploads are garbage-collected after
+  30 days.
+- Attachments flow through the boundaries: project export gains
+  `schema_version: 2` with attachment metadata (bytes stay in the backup
+  bundle, not the JSON), `backup` copies attachment files with a per-file
+  sha256 manifest, `restore` verifies directory coverage, and the CLI gains
+  a read-only `attachments` list subcommand.
 - Canvas layout switcher: horizontal tree, vertical tree and outline list,
   with folds, branch filter and viewport remembered independently per
   layout (browser-side, per project).
