@@ -1,10 +1,14 @@
-/** Top bar (SPEC 3.1): project switch, search, new top-level route, fit
- *  view, recent changes, export, connection info. */
+/** Top bar (SPEC 3.1): project switch, search, new top-level route, secondary
+ *  actions behind ⋯, connection info.
+ *
+ *  A09: single row at 1280×800 — the secondary actions collapsed into a ⋯
+ *  menu, the search box flexes (min-width 240), the project select and the
+ *  connection span ellipsize instead of wrapping.
+ */
 
-import { useState } from "react";
-import type { Project, SearchItem } from "../lib/types";
+import { useEffect, useRef, useState } from "react";
+import type { Project, SearchItem, CommitItem } from "../lib/types";
 import { STATUS_LABEL, fmtTime } from "../lib/format";
-import type { CommitItem } from "../lib/types";
 import type { ProjectLite } from "../gate/TokenGate";
 
 export interface TopBarSearch {
@@ -31,6 +35,7 @@ export interface TopBarProps {
   onFit: () => void;
   onManualRefresh: () => void;
   onExport: () => void;
+  onShowAiAccess: () => void;
   onExit: () => void;
   search: TopBarSearch;
   recent: {
@@ -43,13 +48,29 @@ export interface TopBarProps {
 
 export default function TopBar(p: TopBarProps) {
   const [searchFocus, setSearchFocus] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const showSearch = p.search.open || (searchFocus && p.search.q.trim());
+
+  // Close on outside click only. The guard on `.menu` (which also wraps the
+  // ⋯ button) is load-bearing: React may flush this effect inside the very
+  // click that opened the menu, so an unguarded document listener would
+  // close it on the opening click itself.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const h = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("click", h);
+    return () => document.removeEventListener("click", h);
+  }, [menuOpen]);
 
   return (
     <div className="topbar">
       <span className="brand">ResearchMap</span>
 
       <select
+        className="project-sel"
         value={p.currentProjectId}
         onChange={(e) => p.onSwitchProject(e.target.value)}
         title="切换项目"
@@ -59,9 +80,8 @@ export default function TopBar(p: TopBarProps) {
         ))}
       </select>
       <button onClick={p.onCreateProject} title="创建项目">+ 项目</button>
-      {p.project && <button onClick={p.onEditProject} title="编辑项目名称与目标">项目设置</button>}
 
-      <div style={{ position: "relative", flex: 1, maxWidth: 420 }}>
+      <div className="searchbox">
         <input
           placeholder="搜索标题/摘要/标签/观察/结论（中文子串可用）"
           value={p.search.q}
@@ -104,28 +124,65 @@ export default function TopBar(p: TopBarProps) {
       </div>
 
       <button onClick={p.onNewRoot}>+ 一级路线</button>
-      <button onClick={p.onFit} title="将视野调整到当前全图（仅手动触发）">适应当前图</button>
 
-      <div style={{ position: "relative" }}>
-        <button onClick={p.recent.toggle} title="最近的提交（定位到具体节点）">近期变化 ▾</button>
-        {p.recent.open && (
+      <div className="menu" ref={menuRef}>
+        <button
+          className={menuOpen ? "dotmenu open" : "dotmenu"}
+          onClick={() => setMenuOpen((v) => !v)}
+          title="更多：项目设置 / 适应当前图 / 近期变化 / 导出 / AI 接入"
+        >
+          ⋯
+        </button>
+        {menuOpen && (
           <div className="pop" style={{ top: "100%", right: 0 }}>
-            <div className="pop-head">近期变化（新→旧）</div>
-            {p.recent.commits.length === 0 && <div className="pop-item muted">暂无提交</div>}
-            {p.recent.commits.map((c) => (
-              <div key={c.id} className="pop-item" onClick={() => p.recent.onPick(c)}>
-                <b>v{c.revision}</b> · {c.summary}
-                <div className="muted">{fmtTime(c.created_at)} · {c.actor}</div>
+            {p.project && (
+              <div className="pop-item" onClick={() => { setMenuOpen(false); p.onEditProject(); }}>
+                项目设置
               </div>
-            ))}
+            )}
+            <div className="pop-item" onClick={() => { setMenuOpen(false); p.onFit(); }}>
+              适应当前图
+            </div>
+            <div className={`pop-item dotmenu-line${p.recent.open ? " on" : ""}`} onClick={() => p.recent.toggle()}>
+              近期变化 ▾
+            </div>
+            {p.recent.open && (
+              <>
+                {p.recent.commits.length === 0 && <div className="pop-item muted sub">暂无提交</div>}
+                {p.recent.commits.map((c) => (
+                  <div
+                    key={c.id}
+                    className="pop-item sub"
+                    onClick={() => {
+                      p.recent.onPick(c);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    <b>v{c.revision}</b> · {c.summary}
+                    <div className="muted">{fmtTime(c.created_at)} · {c.actor}</div>
+                  </div>
+                ))}
+              </>
+            )}
+            <div
+              className="pop-item"
+              onClick={() => {
+                setMenuOpen(false);
+                p.onExport();
+              }}
+              title="下载完整项目 JSON（含归档与历史）"
+            >
+              导出
+            </div>
+            <div className="pop-item" onClick={() => { setMenuOpen(false); p.onShowAiAccess(); }}>
+              AI 接入说明
+            </div>
           </div>
         )}
       </div>
 
-      <button onClick={p.onExport} title="下载完整项目 JSON（含归档与历史）">导出</button>
       <button onClick={p.onManualRefresh} title="手动检查记录是否变化">刷新</button>
 
-      <div className="conn grow" />
       <span className="conn" title="本次会话的访问者身份（由令牌决定，不可伪造）">
         {p.actor ? `身份: ${p.actor}` : "…"}
         {p.appVersion ? ` · v${p.appVersion}` : ""}

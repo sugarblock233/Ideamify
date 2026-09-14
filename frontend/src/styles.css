@@ -65,11 +65,25 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   min-height: 48px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
-.topbar .grow { flex: 1; }
-.brand { font-weight: 700; letter-spacing: 0.02em; color: var(--accent); margin-right: 4px; }
-.topbar select, .topbar input { max-width: 320px; }
+.brand { font-weight: 700; letter-spacing: 0.02em; color: var(--accent); margin-right: 4px; flex: none; }
+/* A09: single-row top bar — the project select and the connection span
+   ellipsize; search flexes between 220px and 640px; secondary actions live
+   in the ⋯ menu instead of wrapping. */
+.topbar .project-sel {
+  max-width: 180px; min-width: 96px; flex: 0 1 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.searchbox { position: relative; flex: 1.4 1 220px; min-width: 220px; max-width: 640px; }
+.menu { position: relative; flex: none; }
+.dotmenu.open { border-color: var(--sel); color: var(--sel); }
+.pop-item.sub { padding-left: 22px; font-size: 12px; }
+.topbar .conn {
+  flex: 1 1 auto; min-width: 0; text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-right: 4px;
+}
 
 .workspace { display: flex; flex: 1; min-height: 0; }
 .canvas-wrap { position: relative; flex: 1; min-width: 0; }
@@ -217,6 +231,18 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
   padding: 8px 12px; display: flex; gap: 10px; align-items: center;
   max-width: 90%;
 }
+/* A08: the compact chip shown after the update banner was dismissed with 稍后 */
+.banner.pending-chip {
+  left: 12px; transform: none; max-width: none;
+  padding: 4px 10px; font-size: 12px;
+}
+/* canvas hint: how many of the selected node's relations the lines show */
+.relcount-hint {
+  position: absolute; left: 12px; bottom: 12px; z-index: 30;
+  font-size: 12px; color: var(--ink-dim);
+  background: rgba(255,255,255,.92); border: 1px solid var(--line);
+  border-radius: 8px; padding: 4px 10px;
+}
 .breadcrumbs {
   position: absolute; top: 8px; left: 8px; z-index: 30;
   background: rgba(255,255,255,.92); border: 1px solid var(--line);
@@ -288,7 +314,57 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 
 .evid-row { display: grid; grid-template-columns: 86px 1fr 1fr 1fr 28px; gap: 6px; align-items: start; margin-bottom: 6px; }
 .evid-row .x { padding-top: 6px; border: none; background: none; color: var(--st-red); }
+.evid-note { width: 100%; font-size: 12px; margin: -2px 0 10px; }
 .pager { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 12px; }
+
+/* A02: sticky save/cancel bar of the detail editor */
+.savebar {
+  position: sticky; bottom: 0; margin-top: 14px;
+  display: flex; gap: 8px; align-items: center;
+  background: var(--panel); padding: 8px 0; border-top: 1px solid var(--line);
+}
+.chip {
+  font-size: 11px; color: var(--st-yellow);
+  background: var(--warn-bg); border: 1px solid var(--warn-edge);
+  border-radius: 10px; padding: 1px 8px; white-space: nowrap;
+}
+
+/* B01: read-first detail view */
+.readview { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.readsec-label { font-size: 11px; color: var(--ink-dim); margin-bottom: 2px; }
+.readsec-body { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+
+/* B02: evidence cards (read mode) */
+.evid-card {
+  border: 1px solid var(--line); border-left-width: 3px;
+  border-radius: 6px; padding: 6px 10px; margin: 6px 0;
+}
+.evhead { display: flex; gap: 8px; align-items: baseline; font-size: 11px; flex-wrap: wrap; }
+.evhead b { font-size: 12px; }
+.evkind {
+  color: var(--ink-dim); border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 4px; background: #fafbfc; white-space: nowrap; flex: none;
+}
+.evvalue { display: flex; gap: 6px; align-items: baseline; margin-top: 4px; font-size: 12px; word-break: break-all; }
+.evvalue a { color: var(--sel); }
+.evtext { white-space: pre-wrap; line-height: 1.45; }
+.evcopy { flex: none; font-size: 11px; padding: 1px 8px; }
+.evnote { font-size: 11px; margin-top: 4px; }
+
+/* A06 / B06 modal helpers */
+.gated-fields { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 4px; }
+.gated-fields .evid-row { grid-template-columns: 96px 1fr 1.4fr 28px; }
+.form-err {
+  margin-top: 8px; font-size: 12px; color: var(--st-red);
+  background: var(--err-bg); border: 1px solid var(--err-edge);
+  border-radius: 6px; padding: 6px 10px;
+}
+.aiaccess-pre {
+  background: #f2f4f7; border-radius: 6px; padding: 10px; font-size: 12px;
+  line-height: 1.5; overflow-x: auto; white-space: pre; margin: 8px 0;
+}
+.snap { font-size: 12px; }
+.diff-row .v { white-space: pre-wrap; }
 
 .conn { font-size: 12px; color: var(--ink-dim); }
 @media (max-width: 900px) {
