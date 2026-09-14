@@ -830,10 +830,13 @@ def _flip_referenced_attachments(s: Session, project_id: str, req) -> None:
     幂等；引用了不存在/他项目的附件不报错（渲染端自然 404，回执已注明）。"""
     ids: set[str] = set()
     for op in req.operations:
-        if getattr(op, "op", None) not in ("node.create", "node.update"):
+        kind = getattr(op, "op", None)
+        if kind not in ("node.create", "node.update"):
             continue
-        texts = [getattr(op, "details_md", "") or ""]
-        for ev in getattr(op, "evidence", None) or []:
+        # node.create 是平铺字段；node.update 的字段包在 .fields 里（partial 语义）
+        carrier = op if kind == "node.create" else op.fields
+        texts = [getattr(carrier, "details_md", "") or ""]
+        for ev in getattr(carrier, "evidence", None) or []:
             texts.append(getattr(ev, "value", "") or "")
             texts.append(getattr(ev, "note", "") or "")
         for t in texts:

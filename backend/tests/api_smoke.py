@@ -751,6 +751,17 @@ check("commit referencing attachment -> 200", rr.status_code == 200, rr.text[:20
 st = {i["id"]: i["state"] for i in c.get(f"/api/v1/projects/{pid}/attachments").json()["items"]}
 check("referenced attachment flipped staged->attached in-commit", st.get(att["id"]) == "attached", str(st)[:150])
 
+# node.update 的引用同样翻转（字段包在 .fields 里——改名后再引用第二张图）
+r = cm.post(f"/api/v1/projects/{pid}/attachments",
+            files={"file": ("fig2.png", _png(5, 4, (60, 200, 60)), "image/png")})
+att2 = r.json()
+rr = commit([{"op": "node.update", "id": nid, "fields": {
+                 "details_md": f"更新后的对照图：![图2](attachment:{att2['id']})"}}],
+            c.get(f"/api/v1/projects/{pid}").json()["revision"], summary="更新引用第二张图")
+check("node.update referencing attachment -> 200", rr.status_code == 200, rr.text[:200])
+st = {i["id"]: i["state"] for i in c.get(f"/api/v1/projects/{pid}/attachments").json()["items"]}
+check("attachment referenced via node.update.fields flipped too", st.get(att2["id"]) == "attached", str(st)[:200])
+
 # D4: 导出含附件元数据（字节不入 JSON 导出）
 e2 = c.get(f"/api/v1/projects/{pid}/export").json()
 row = next((a for a in e2.get("attachments", []) if a["id"] == att["id"]), None)
