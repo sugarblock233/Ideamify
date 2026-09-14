@@ -176,3 +176,14 @@ test("截图 2：节点详情阅读视图（1280×800，单行顶栏）", async 
 
   await page.screenshot({ path: path.join(IMG_DIR, "detail-panel-1280x800.png") });
 });
+test("截图 3：自适应顶栏 icon 档（560×700，搜索收为 🔍 入口）", async ({ page }) => {
+  mkdirSync(IMG_DIR, { recursive: true });
+  await page.setViewportSize({ width: 560, height: 700 });
+  const d = await seedDemo(page);
+  await enterStudio(page, d.pid);
+  await expect(page.locator(".topbar")).toHaveClass(/tier-icon/);
+  await page.getByTestId("topbar-search-toggle").click();
+  await expect(page.locator(".searchbox.compact-search input")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(IMG_DIR, "topbar-icon-tier-560x700.png") });
+});
