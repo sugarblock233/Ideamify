@@ -3,6 +3,7 @@
 
 import { ApiError, type CommitResponse } from "./types";
 
+import { t } from "./i18n";
 let token: string | null = null;
 
 export function setToken(t: string | null) {
@@ -23,7 +24,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     res = await fetch(path, { ...init, headers });
   } catch (e) {
-    throw new ApiError(0, "NETWORK", "无法连接服务器，请检查网络", { detail: String(e) });
+    throw new ApiError(0, "NETWORK", t("api.err.network"), { detail: String(e) });
   }
   const text = await res.text();
   let body: unknown = null;

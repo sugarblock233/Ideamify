@@ -1,7 +1,7 @@
 /** Right panel: node detail + edit (save/cancel), relations list with
  *  pagination, node history with before/after (SPEC 3.2 / 3.3 / 3.5). */
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type {
   ChangeEntry,
   CommitDetail,
@@ -17,6 +17,7 @@ import type {
 import { NODE_KINDS, NODE_STATUSES, RELATION_KINDS } from "../lib/types";
 import { STATUS_COLOR, fmtTime, kindLabel, relationKindLabel, statusLabel } from "../lib/format";
 import { MAX_CANVAS_RELATION, relationLabel } from "../lib/relations";
+import { t, useT } from "../lib/i18n";
 import { renderMarkdown } from "../lib/markdown";
 import type { FieldConflict } from "../lib/merge";
 
@@ -52,20 +53,10 @@ export function draftOf(n: NodeFull): Draft {
   };
 }
 
-/** A02/R02: Chinese labels for the three-way conflict comparison. */
-export const DRAFT_FIELD_LABEL: Record<keyof Draft, string> = {
-  kind: "类型",
-  title: "标题",
-  summary: "摘要",
-  status: "状态",
-  rationale: "为什么做 · 试法",
-  finding: "直接观察",
-  decision: "当前解释与决定",
-  scope: "适用条件",
-  details_md: "长说明",
-  tags: "标签",
-  evidence: "证据引用",
-};
+/** A02/R02: localized labels for the three-way conflict comparison. */
+export function draftFieldLabel(f: keyof Draft): string {
+  return t(`fld.${f}`);
+}
 
 /** One field both you and someone else changed, with all three versions so
  *  the user can compare instead of being told "已保留你的值" after the fact. */
@@ -76,16 +67,16 @@ export function formatDraftValue(field: keyof Draft, v: Draft[keyof Draft]): str
   if (field === "kind") return kindLabel(v as NodeKind);
   if (field === "status") return statusLabel(v as NodeStatus);
   if (field === "tags") {
-    const t = v as string[];
-    return t.length ? t.join("、") : "（空）";
+    const tags = v as string[];
+    return tags.length ? tags.join(t("common.list.sep")) : t("common.empty.paren");
   }
   if (field === "evidence") {
     const e = v as EvidenceItem[];
-    if (!e.length) return "（无证据）";
-    return e.map((x) => `${x.kind}｜${x.label || "(无标签)"}｜${x.value}`).join("\n");
+    if (!e.length) return t("fmt.evidence.none");
+    return e.map((x) => `${x.kind}｜${x.label || t("fmt.evidence.nolabel")}｜${x.value}`).join("\n");
   }
   const s = String(v ?? "");
-  return s.trim() ? s : "（空）";
+  return s.trim() ? s : t("common.empty.paren");
 }
 
 export function diffDraft(base: Draft, cur: Draft): Partial<Draft> {
@@ -167,26 +158,27 @@ export interface SidePanelProps {
 /* --------------------------------- panel --------------------------------- */
 
 export default function SidePanel(p: SidePanelProps) {
+  const t = useT();
   const n = p.node;
   return (
     <aside className="side">
       <div className="head">
         <div className="tabs" style={{ padding: 0, borderTop: "none", marginBottom: -12 }}>
           <button className={p.tab === "detail" ? "active" : ""} onClick={() => p.setTab("detail")}>
-            详情
+            {t("tab.detail")}
           </button>
           <button className={p.tab === "relations" ? "active" : ""} onClick={() => p.setTab("relations")}>
-            关联
+            {t("tab.relations")}
           </button>
           <button className={p.tab === "history" ? "active" : ""} onClick={() => p.setTab("history")}>
-            历史
+            {t("tab.history")}
           </button>
         </div>
       </div>
       {!n && (
         <div className="body">
           <div className="empty">
-            {p.loading ? "加载中…" : "选择一个节点查看详情。"}
+            {p.loading ? t("panel.loading") : t("panel.empty.select")}
           </div>
           <ProjectInfo project={p.project} />
         </div>
@@ -201,12 +193,13 @@ export default function SidePanel(p: SidePanelProps) {
 }
 
 function ProjectInfo({ project }: { project: Project | null }) {
+  const t = useT();
   if (!project) return null;
   return (
     <div className="muted" style={{ marginTop: 16 }}>
       <div style={{ fontWeight: 600, color: "var(--ink)" }}>{project.name}</div>
       <div style={{ margin: "4px 0" }}>{project.objective}</div>
-      <div>当前版本 v{project.revision}</div>
+      <div>{t("panel.current.rev", { n: project.revision })}</div>
     </div>
   );
 }
@@ -214,6 +207,7 @@ function ProjectInfo({ project }: { project: Project | null }) {
 /* ------------------------------- detail ---------------------------------- */
 
 function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewMd, setPreviewMd] = useState(false);
@@ -226,23 +220,21 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
   const d = p.draft ?? draftOf(n);
   const set = (patch: Partial<Draft>) => p.setDraft({ ...d, ...patch });
 
-  const missing = useMemo(() => {
-    if (d.status !== "supported" && d.status !== "not_supported") return [];
-    const m: string[] = [];
-    if (!d.scope.trim()) m.push("适用条件 scope");
-    if (!d.finding.trim()) m.push("直接观察 finding");
-    if (!d.decision.trim()) m.push("当前解释与决定 decision");
-    if (d.evidence.length === 0) m.push("至少一条证据 evidence");
-    return m;
-  }, [d.status, d.scope, d.finding, d.decision, d.evidence]);
+  const missing: string[] = [];
+  if (d.status === "supported" || d.status === "not_supported") {
+    if (!d.scope.trim()) missing.push(t("fld.scope.gate"));
+    if (!d.finding.trim()) missing.push(t("fld.finding.gate"));
+    if (!d.decision.trim()) missing.push(t("fld.decision.gate"));
+    if (d.evidence.length === 0) missing.push(t("fld.evidence.gate"));
+  }
 
-  const pathText = n.path.length ? n.path.map((x) => x.title).join(" / ") : "一级节点";
+  const pathText = n.path.length ? n.path.map((x) => x.title).join(" / ") : t("common.first.level.node");
 
   return (
     <div className="body">
       <div className="pathline">
         {pathText}
-        {n.archived && <span style={{ color: "var(--st-red)" }}>（已归档）</span>}
+        {n.archived && <span style={{ color: "var(--st-red)" }}>{t("panel.archived.paren")}</span>}
       </div>
       <h2 style={{ marginBottom: 2 }}>
         {n.title}
@@ -259,39 +251,39 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         </span>
       </h2>
       <div className="muted" style={{ marginBottom: 8 }}>
-        更新于 {fmtTime(n.updated_at)} · 作者 {n.updated_by}
+        {t("detail.updated", { time: fmtTime(n.updated_at), by: n.updated_by })}
       </div>
 
       {p.cameFrom && (
         <div className="hint" style={{ marginBottom: 6 }}>
-          你从关联目标定位过来。
+          {t("detail.camefrom")}
           <button style={{ marginLeft: 8 }} onClick={p.onBackToFrom}>
-            返回来源节点
+            {t("detail.back.to.from")}
           </button>
         </div>
       )}
       {p.dirty && (
-        <div className="hint">有未保存的修改。切换节点或关闭面板会提醒；服务器版本变化不会覆盖草稿。</div>
+        <div className="hint">{t("detail.dirty.hint")}</div>
       )}
       {p.draftStale && (
         <div className="hint err">
-          本地草稿基于 v{p.draftBaseRev}，服务器已推进到 v{p.project?.revision}（期间有他人的提交）。
+          {t("detail.stale.hint", { base: String(p.draftBaseRev), server: String(p.project?.revision) })}
           <div style={{ margin: "6px 0", display: "flex", gap: 6 }}>
             <button onClick={p.onRebaseDraft} disabled={p.conflictRevision != null}>
-              载入新版并重排草稿
+              {t("detail.rebase.btn")}
             </button>
           </div>
-          重排前不能保存，避免静默覆盖他人修改。
+          {t("detail.stale.nosave")}
         </div>
       )}
       {p.conflictRevision != null && (
         <div className="hint err">
-          提交时发生版本冲突：服务器已更新到 v{p.conflictRevision}，你的草稿仍完整保留。
+          {t("detail.conflict.hint", { v: String(p.conflictRevision) })}
           <div style={{ margin: "6px 0", display: "flex", gap: 6 }}>
-            <button onClick={p.onRebaseDraft}>载入新版并重排草稿</button>
-            <button onClick={p.onDiscardDraft}>放弃草稿</button>
+            <button onClick={p.onRebaseDraft}>{t("detail.rebase.btn")}</button>
+            <button onClick={p.onDiscardDraft}>{t("detail.discard.btn")}</button>
           </div>
-          不会静默以你的旧版本覆盖他人修改。
+          {t("detail.conflict.nosilent")}
         </div>
       )}
       {p.conflicts.length > 0 && (
@@ -301,17 +293,17 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
 
       {missing.length > 0 && (
         <div className="hint">
-          状态为“{statusLabel(d.status)}”要求填写：{missing.join("、")}。这只是记录完整性要求，不是自动科学审查。
+          {t("detail.gate.hint", { status: statusLabel(d.status), items: missing.join(t("common.list.sep")) })}
         </div>
       )}
 
       {editing ? (
         <div className="editform">
           <div className="row" style={{ marginBottom: 8 }}>
-            <span className="muted">编辑模式 —— 只提交你改动的字段</span>
+            <span className="muted">{t("edit.mode.hint")}</span>
           </div>
 
-          <label className="field">类型 / 状态</label>
+          <label className="field">{t("edit.kindstatus")}</label>
       <div style={{ display: "flex", gap: 8 }}>
         <select value={d.kind} onChange={(e) => set({ kind: e.target.value as NodeKind })}>
           {NODE_KINDS.map((k) => (
@@ -325,25 +317,25 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         </select>
       </div>
 
-      <label className="field">标题（1–80 字符）</label>
+      <label className="field">{t("edit.field.title")}</label>
       <input value={d.title} maxLength={80} onChange={(e) => set({ title: e.target.value })} style={{ width: "100%" }} />
 
-      <label className="field">摘要：一句话研究增量（0–280）</label>
+      <label className="field">{t("edit.field.summary")}</label>
       <textarea value={d.summary} maxLength={280} onChange={(e) => set({ summary: e.target.value })} style={{ width: "100%" }} />
 
-      <label className="field">为什么做，试法是什么 rationale（0–2000）</label>
+      <label className="field">{t("edit.field.rationale")}</label>
       <textarea value={d.rationale} maxLength={2000} onChange={(e) => set({ rationale: e.target.value })} style={{ width: "100%" }} />
 
-      <label className="field">直接观察到了什么 finding（0–2000，未确认写未知）</label>
+      <label className="field">{t("edit.field.finding")}</label>
       <textarea value={d.finding} maxLength={2000} onChange={(e) => set({ finding: e.target.value })} style={{ width: "100%" }} />
 
-      <label className="field">当前解释与下一步决定 decision（0–2000）</label>
+      <label className="field">{t("edit.field.decision")}</label>
       <textarea value={d.decision} maxLength={2000} onChange={(e) => set({ decision: e.target.value })} style={{ width: "100%" }} />
 
-      <label className="field">适用条件 scope（0–1000，红/绿状态必填）</label>
+      <label className="field">{t("edit.field.scope")}</label>
       <textarea value={d.scope} maxLength={1000} onChange={(e) => set({ scope: e.target.value })} style={{ width: "100%" }} />
 
-      <label className="field">标签（逗号分隔，每个 1–32 字符，最多 10 个）</label>
+      <label className="field">{t("edit.field.tags")}</label>
       <input
         value={d.tags.join(", ")}
         onChange={(e) =>
@@ -355,12 +347,12 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
       />
 
       <label className="field detail-label">
-        长说明 details_md（Markdown，0–30000）
+        {t("edit.field.details")}
         <button
           style={{ marginLeft: 8, padding: "0 6px" }}
           onClick={() => { setDetailsOpen(!detailsOpen); setPreviewMd(false); }}
         >
-          {detailsOpen ? "收起" : "展开"}
+          {detailsOpen ? t("common.collapse") : t("common.expand")}
         </button>
       </label>
       {detailsOpen && (
@@ -379,12 +371,12 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
             />
           )}
           <button onClick={() => setPreviewMd(!previewMd)} style={{ marginTop: 6 }}>
-            {previewMd ? "返回编辑（Markdown 渲染已禁用原始 HTML/脚本/外链图片）" : "预览渲染"}
+            {previewMd ? t("edit.preview.back") : t("edit.preview.go")}
           </button>
         </>
       )}
 
-      <label className="field">证据引用（{d.evidence.length}/20）——只登记定位，系统不抓取、不执行、不代理读取</label>
+      <label className="field">{t("edit.evidence.label", { n: d.evidence.length })}</label>
       {d.evidence.map((ev, i) => (
         <Fragment key={i}>
           <div className="evid-row">
@@ -396,9 +388,9 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
               set({ evidence: evs });
             }}
           >
-            <option value="inline">inline 说明</option>
-            <option value="url">url 链接</option>
-            <option value="path">path 路径</option>
+            <option value="inline">{t("edit.ev.inline")}</option>
+            <option value="url">{t("edit.ev.url")}</option>
+            <option value="path">{t("edit.ev.path")}</option>
           </select>
           <input
             placeholder="label"
@@ -411,7 +403,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
             }}
           />
           <input
-            placeholder={ev.kind === "url" ? "http(s)://…" : ev.kind === "path" ? "服务器/本机报告路径" : "一小段原始观察或说明"}
+            placeholder={ev.kind === "url" ? t("edit.ev.ph.url") : ev.kind === "path" ? t("edit.ev.ph.path") : t("edit.ev.ph.inline")}
             value={ev.value}
             maxLength={4000}
             onChange={(e) => {
@@ -422,7 +414,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
           />
           <button
             className="x"
-            title="删除"
+            title={t("common.delete.title")}
             disabled={d.evidence.length === 0}
             onClick={() => set({ evidence: d.evidence.filter((_, j) => j !== i) })}
           >
@@ -431,7 +423,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         </div>
         <input
           className="evid-note"
-          placeholder="note：限定语 / 可信度说明（如：样本少，不普适）"
+          placeholder={t("edit.ev.note.ph")}
           maxLength={500}
           value={ev.note}
           onChange={(e) => {
@@ -448,7 +440,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
             set({ evidence: [...d.evidence, { kind: "inline", label: "", value: "", note: "" }] })
           }
         >
-          + 添加证据
+          {t("edit.ev.add")}
         </button>
       )}
         </div>
@@ -465,27 +457,27 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
               disabled={!p.dirty || !d.title.trim() || p.draftStale || p.conflicts.length > 0}
               title={
                 p.conflicts.length > 0
-                  ? `还有 ${p.conflicts.length} 个冲突字段未处理：先在上方逐项选择`
+                  ? t("detail.save.blocked.conflicts", { n: p.conflicts.length })
                   : p.draftStale
-                    ? "草稿基于旧版本：先点「载入新版并重排草稿」"
+                    ? t("detail.save.blocked.stale")
                     : undefined
               }
             >
-              保存
+              {t("modal.common.save")}
             </button>
             <button onClick={p.onDiscardDraft} disabled={!p.dirty}>
-              取消（恢复原值）
+              {t("detail.cancel.revert")}
             </button>
-            <button onClick={() => setEditing(false)}>收起编辑</button>
+            <button onClick={() => setEditing(false)}>{t("detail.collapse.edit")}</button>
           </>
         ) : (
           <>
-            {p.dirty && <span className="chip">有未保存的修改</span>}
+            {p.dirty && <span className="chip">{t("detail.dirty.chip")}</span>}
             <button className="primary" onClick={() => setEditing(true)}>
-              编辑
+              {t("detail.edit")}
             </button>
             <button onClick={p.onCreateChild} disabled={n.archived}>
-              + 子节点
+              {t("detail.add.child")}
             </button>
           </>
         )}
@@ -494,7 +486,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
       {p.organization && <OrganizationTab org={p.organization} node={n} />}
       {n.archived && (
         <div style={{ marginTop: 10 }} className="hint err">
-          本节点已归档。恢复后相关 relations 才会重新渲染。
+          {t("detail.archived.notice")}
         </div>
       )}
     </div>
@@ -514,31 +506,31 @@ function ConflictResolver({
   conflicts: DraftConflict[];
   onResolve: (field: keyof Draft, choice: "local" | "server" | "manual") => void;
 }) {
+  const t = useT();
   return (
     <div className="hint err conflict-box">
       <div>
-        以下 {conflicts.length} 个字段你与他人同时修改，已保留你的值。请逐项对比后选择，
-        全部处理完才能保存——不会静默按任何一方覆盖。
+        {t("conflict.intro", { n: conflicts.length })}
       </div>
       {conflicts.map((c) => (
         <div key={c.field} className="conflict-field">
           <div className="conflict-name">{c.label}</div>
           <div className="conflict-col">
-            <span className="conflict-tag">读取时（共同起点）</span>
+            <span className="conflict-tag">{t("conflict.tag.base")}</span>
             <pre>{formatDraftValue(c.field, c.base)}</pre>
           </div>
           <div className="conflict-col">
-            <span className="conflict-tag">你的草稿</span>
+            <span className="conflict-tag">{t("conflict.tag.local")}</span>
             <pre>{formatDraftValue(c.field, c.local)}</pre>
           </div>
           <div className="conflict-col">
-            <span className="conflict-tag">服务器（他人已提交）</span>
+            <span className="conflict-tag">{t("conflict.tag.server")}</span>
             <pre>{formatDraftValue(c.field, c.server)}</pre>
           </div>
           <div className="conflict-actions">
-            <button onClick={() => onResolve(c.field, "local")}>保留我的</button>
-            <button onClick={() => onResolve(c.field, "server")}>采用服务器</button>
-            <button onClick={() => onResolve(c.field, "manual")}>我自己合并</button>
+            <button onClick={() => onResolve(c.field, "local")}>{t("conflict.keep.mine")}</button>
+            <button onClick={() => onResolve(c.field, "server")}>{t("conflict.use.server")}</button>
+            <button onClick={() => onResolve(c.field, "manual")}>{t("conflict.manual")}</button>
           </div>
         </div>
       ))}
@@ -549,13 +541,14 @@ function ConflictResolver({
 /* ------------------------------- read view (B01) ---------------------------- */
 
 function ReadView({ n }: { n: NodeFull }) {
+  const t = useT();
   const [detailsOpen, setDetailsOpen] = useState(n.details_md.trim().length > 0);
   const sections: [string, string][] = [
-    ["摘要 summary", n.summary],
-    ["为什么做 · 试法 rationale", n.rationale],
-    ["直接观察 finding", n.finding],
-    ["当前解释与决定 decision", n.decision],
-    ["适用条件 scope", n.scope],
+    [t("read.sec.summary"), n.summary],
+    [t("read.sec.rationale"), n.rationale],
+    [t("read.sec.finding"), n.finding],
+    [t("read.sec.decision"), n.decision],
+    [t("read.sec.scope"), n.scope],
   ].filter(([, v]) => v && v.trim().length > 0) as [string, string][];
   return (
     <div className="readview">
@@ -567,13 +560,13 @@ function ReadView({ n }: { n: NodeFull }) {
       ))}
       {n.tags.length > 0 && (
         <div className="readsec">
-          <div className="readsec-label">标签 tags</div>
-          <div className="readsec-body">{n.tags.join("、")}</div>
+          <div className="readsec-label">{t("read.sec.tags")}</div>
+          <div className="readsec-body">{n.tags.join(t("common.list.sep"))}</div>
         </div>
       )}
       {n.evidence.length > 0 && (
         <div className="readsec">
-          <div className="readsec-label">证据引用 evidence（{n.evidence.length}/20）</div>
+          <div className="readsec-label">{t("read.sec.evidence", { n: n.evidence.length })}</div>
           {n.evidence.map((ev, i) => (
             <EvidenceReadCard key={i} ev={ev} />
           ))}
@@ -582,12 +575,12 @@ function ReadView({ n }: { n: NodeFull }) {
       {n.details_md.trim() && (
         <div className="readsec">
           <div className="readsec-label">
-            长说明 details_md（Markdown）
+            {t("read.sec.details")}
             <button
               style={{ marginLeft: 8, padding: "0 6px" }}
               onClick={() => setDetailsOpen(!detailsOpen)}
             >
-              {detailsOpen ? "收起" : "展开"}
+              {detailsOpen ? t("common.collapse") : t("common.expand")}
             </button>
           </div>
           {detailsOpen && (
@@ -603,6 +596,7 @@ function ReadView({ n }: { n: NodeFull }) {
 }
 
 function EvidenceReadCard({ ev }: { ev: EvidenceItem }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   // B02: url only becomes an anchor for http(s); everything else is plain text.
   const isSafeUrl = ev.kind === "url" && /^https?:\/\//i.test(ev.value.trim());
@@ -618,7 +612,7 @@ function EvidenceReadCard({ ev }: { ev: EvidenceItem }) {
     <div className="evid-card">
       <div className="evhead">
         <span className="evkind">
-          {ev.kind === "inline" ? "行内记录" : ev.kind === "url" ? "url 链接" : "path 路径"}
+          {ev.kind === "inline" ? t("read.ev.inline") : ev.kind === "url" ? t("read.ev.url") : t("read.ev.path")}
         </span>
         {ev.label && <b>{ev.label}</b>}
       </div>
@@ -632,13 +626,13 @@ function EvidenceReadCard({ ev }: { ev: EvidenceItem }) {
             <span className="evtext">{ev.value}</span>
           )}
           {!isSafeUrl && (
-            <button className="evcopy" onClick={copy} title="复制内容">
-              {copied ? "已复制 ✓" : "复制"}
+            <button className="evcopy" onClick={copy} title={t("read.ev.copy.title")}>
+              {copied ? t("read.ev.copied") : t("read.ev.copy")}
             </button>
           )}
         </div>
       )}
-      {ev.note && <div className="evnote muted">note：{ev.note}</div>}
+      {ev.note && <div className="evnote muted">{t("read.ev.note", { note: ev.note })}</div>}
     </div>
   );
 }
@@ -646,6 +640,7 @@ function EvidenceReadCard({ ev }: { ev: EvidenceItem }) {
 /* ------------------------------ organization ------------------------------ */
 
 function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organization"]>; node: NodeFull }) {
+  const t = useT();
   const [parent, setParent] = useState<string | null>(org.currentParent);
   useEffect(() => setParent(org.currentParent), [org.currentParent]);
   const [showArchive, setShowArchive] = useState(false);
@@ -656,10 +651,10 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
 
   return (
     <div style={{ marginTop: 18, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-      <div className="field" style={{ margin: 0, marginBottom: 6 }}>组织与移动</div>
+      <div className="field" style={{ margin: 0, marginBottom: 6 }}>{t("org.title")}</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        <button onClick={org.onMoveUp} disabled={!org.canUp}>↑ 上移</button>
-        <button onClick={org.onMoveDown} disabled={!org.canDown}>↓ 下移</button>
+        <button onClick={org.onMoveUp} disabled={!org.canUp}>{t("org.move.up")}</button>
+        <button onClick={org.onMoveDown} disabled={!org.canDown}>{t("org.move.down")}</button>
         <select
           value={parent ?? ""}
           onChange={(e) => setParent(e.target.value === "" ? null : e.target.value)}
@@ -673,7 +668,7 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
           disabled={parent === org.currentParent}
           onClick={() => org.onMove(parent)}
         >
-          移动归属
+          {t("org.move.btn")}
         </button>
       </div>
       {!node.archived && (
@@ -682,15 +677,15 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
             <button
               className="danger"
               disabled={!isLeaf}
-              title={isLeaf ? "" : "只能归档没有子节点的叶子节点"}
+              title={isLeaf ? "" : t("org.archive.leafonly.title")}
               onClick={() => setShowArchive(true)}
             >
-              归档此节点（仅叶子）
+              {t("org.archive.btn")}
             </button>
           ) : (
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <input
-                placeholder="归档原因（必填）"
+                placeholder={t("org.archive.reason.ph")}
                 value={archiveReason}
                 onChange={(e) => setArchiveReasonLocal(e.target.value)}
                 style={{ maxWidth: 260 }}
@@ -700,12 +695,12 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
                 disabled={!archiveReason.trim()}
                 onClick={() => { org.onArchive(archiveReason.trim()); setShowArchive(false); setArchiveReasonLocal(""); }}
               >
-                确认归档
+                {t("org.archive.confirm")}
               </button>
-              <button onClick={() => setShowArchive(false)}>取消</button>
+              <button onClick={() => setShowArchive(false)}>{t("common.cancel")}</button>
             </div>
           )}
-          {!isLeaf && <div className="muted" style={{ marginTop: 4 }}>当前有子节点：请先移动或处理子节点，系统禁止级联删除。</div>}
+          {!isLeaf && <div className="muted" style={{ marginTop: 4 }}>{t("org.archive.blocked")}</div>}
         </div>
       )}
       {/* B04: the inverse of archive. Node archiving is only reversible from the
@@ -715,12 +710,12 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
         <div style={{ marginTop: 8 }}>
           {!showRestoreNode ? (
             <button className="primary" onClick={() => setShowRestoreNode(true)}>
-              恢复此节点
+              {t("org.restore.btn")}
             </button>
           ) : (
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <input
-                placeholder="恢复原因（必填）"
+                placeholder={t("org.restore.reason.ph")}
                 value={restoreNodeReason}
                 onChange={(e) => setRestoreNodeReason(e.target.value)}
                 style={{ maxWidth: 260 }}
@@ -734,9 +729,9 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
                   setRestoreNodeReason("");
                 }}
               >
-                确认恢复
+                {t("org.restore.confirm")}
               </button>
-              <button onClick={() => setShowRestoreNode(false)}>取消</button>
+              <button onClick={() => setShowRestoreNode(false)}>{t("common.cancel")}</button>
             </div>
           )}
         </div>
@@ -748,41 +743,42 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
 /* ------------------------------- relations -------------------------------- */
 
 function RelationsTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
+  const t = useT();
   return (
     <div className="body">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <div className="muted">共 {n.relation_count} 条活跃关联</div>
+        <div className="muted">{t("rel.count", { n: n.relation_count })}</div>
         <label style={{ fontSize: 12 }}>
           <input type="checkbox" checked={p.includeArchived} onChange={(e) => p.setIncludeArchived(e.target.checked)} />
-          显示已归档
+          {t("rel.show.archived")}
         </label>
       </div>
       {p.cameFrom && (
         <div className="hint" style={{ marginBottom: 8 }}>
-          你从关联目标定位过来。
+          {t("detail.camefrom")}
           <button style={{ marginLeft: 8 }} onClick={p.onBackToFrom}>
-            返回来源节点
+            {t("detail.back.to.from")}
           </button>
         </div>
       )}
       <button className="primary" onClick={p.onCreateRelation} style={{ marginBottom: 6 }}>
-        + 新增关联（选择目标 → 类型 → 一句原因）
+        {t("rel.create.btn")}
       </button>
 
-      {p.relations.length === 0 && <div className="empty">该节点暂无直接关联。</div>}
+      {p.relations.length === 0 && <div className="empty">{t("rel.empty")}</div>}
       {p.relations.map((r) => (
         <RelationItemView key={r.id} r={r} p={p} />
       ))}
       {p.relHasMore && p.relCursor && (
         <div className="pager">
           <button onClick={() => p.onRelPage(p.relCursor, true)}>
-            加载下一页（分页每页 20 条，完整可访问）
+            {t("rel.loadmore")}
           </button>
         </div>
       )}
       {p.selectedRelationId && (
         <div className="muted" style={{ marginTop: 10 }}>
-          提示：点击画布虚线或上方条目可单独查看该关系；画布最多显示 {MAX_CANVAS_RELATION} 条，超出部分在本列表可访问。
+          {t("rel.canvas.hint", { max: MAX_CANVAS_RELATION })}
         </div>
       )}
     </div>
@@ -797,8 +793,9 @@ function RelationItemView({ r, p }: { r: RelationItem; p: SidePanelProps }) {
   const [archReason, setArchReason] = useState("");
   const [showRestore, setShowRestore] = useState(false);
   const [restReason, setRestReason] = useState("");
+  const t = useT();
 
-  const otherPath = r.other.path.length ? r.other.path.map((x) => x.title).join(" / ") : "一级节点";
+  const otherPath = r.other.path.length ? r.other.path.map((x) => x.title).join(" / ") : t("common.first.level.node");
 
   const arrow = r.direction === "outgoing" ? "→" : "←";
   const clickLocate = () => {
@@ -811,25 +808,25 @@ function RelationItemView({ r, p }: { r: RelationItem; p: SidePanelProps }) {
       <div
         className="rtitle"
         onClick={() => p.onPickRelation(p.selectedRelationId === r.id ? null : r.id)}
-        title="点我：在画布上单独显示这条关系线"
+        title={t("rel.item.pick.title")}
       >
         <span style={{ opacity: 0.65 }}>{arrow}</span> {relationLabel(r, p.node?.title ?? "")}
-        {r.archived && <span className="arch">（已归档）</span>}
+        {r.archived && <span className="arch">{t("panel.archived.paren")}</span>}
       </div>
-      <div className="rpath">{otherPath}{r.other.archived ? "（节点已归档）" : ""}</div>
+      <div className="rpath">{otherPath}{r.other.archived ? t("rel.item.other.archived") : ""}</div>
       <div className="muted" style={{ marginTop: 2 }}>{r.reason}</div>
       <div className="row">
         {!r.other.archived && (
-          <button onClick={clickLocate}>定位</button>
+          <button onClick={clickLocate}>{t("rel.locate")}</button>
         )}
         {!r.archived && !editing && (
-          <button onClick={() => setEditing(true)}>编辑</button>
+          <button onClick={() => setEditing(true)}>{t("detail.edit")}</button>
         )}
         {!r.archived && !showArchive && (
-          <button className="danger" onClick={() => setShowArchive(true)}>归档关系</button>
+          <button className="danger" onClick={() => setShowArchive(true)}>{t("rel.archive.btn")}</button>
         )}
         {r.archived && !showRestore && (
-          <button onClick={() => setShowRestore(true)}>恢复关系</button>
+          <button onClick={() => setShowRestore(true)}>{t("rel.restore.btn")}</button>
         )}
       </div>
 
@@ -841,7 +838,7 @@ function RelationItemView({ r, p }: { r: RelationItem; p: SidePanelProps }) {
                 <option key={k} value={k}>{relationKindLabel(k)}</option>
               ))}
             </select>
-            <input value={reason} maxLength={500} style={{ flex: 1 }} placeholder="一句原因（1–500）" onChange={(e) => setReason(e.target.value)} />
+            <input value={reason} maxLength={500} style={{ flex: 1 }} placeholder={t("rel.edit.reason.ph")} onChange={(e) => setReason(e.target.value)} />
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button
@@ -849,35 +846,35 @@ function RelationItemView({ r, p }: { r: RelationItem; p: SidePanelProps }) {
               disabled={!reason.trim() || (kind === r.kind && reason === r.reason)}
               onClick={() => { p.onEditRelation(r, { kind, reason: reason.trim() }); setEditing(false); }}
             >
-              保存修改
+              {t("rel.edit.save")}
             </button>
-            <button onClick={() => setEditing(false)}>取消</button>
+            <button onClick={() => setEditing(false)}>{t("common.cancel")}</button>
           </div>
         </div>
       )}
       {!r.archived && showArchive && (
         <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
-          <input placeholder="归档原因" value={archReason} maxLength={500} onChange={(e) => setArchReason(e.target.value)} />
+          <input placeholder={t("rel.archive.reason.ph")} value={archReason} maxLength={500} onChange={(e) => setArchReason(e.target.value)} />
           <button
             className="danger"
             disabled={!archReason.trim()}
             onClick={() => { p.onArchiveRelation(r, archReason.trim()); setShowArchive(false); setArchReason(""); }}
           >
-            确认
+            {t("common.confirm")}
           </button>
-          <button onClick={() => setShowArchive(false)}>取消</button>
+          <button onClick={() => setShowArchive(false)}>{t("common.cancel")}</button>
         </div>
       )}
       {r.archived && showRestore && (
         <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
-          <input placeholder="恢复原因" value={restReason} maxLength={500} onChange={(e) => setRestReason(e.target.value)} />
+          <input placeholder={t("rel.restore.reason.ph")} value={restReason} maxLength={500} onChange={(e) => setRestReason(e.target.value)} />
           <button
             disabled={!restReason.trim()}
             onClick={() => { p.onRestoreRelation(r, restReason.trim()); setShowRestore(false); setRestReason(""); }}
           >
-            确认恢复（需两端未归档）
+            {t("rel.restore.confirm")}
           </button>
-          <button onClick={() => setShowRestore(false)}>取消</button>
+          <button onClick={() => setShowRestore(false)}>{t("common.cancel")}</button>
         </div>
       )}
     </div>
@@ -887,14 +884,15 @@ function RelationItemView({ r, p }: { r: RelationItem; p: SidePanelProps }) {
 /* -------------------------------- history --------------------------------- */
 
 function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["history"] }) {
+  const t = useT();
   const d = history.detail;
   const entry = d?.changes.find((c) => c.object_id === n.id) ?? null;
   return (
     <div className="body">
       <div className="muted" style={{ marginBottom: 8 }}>
-        本节点的提交历史（含 other node 创建/移动等其他提交）。历史只记录不抹除；纠错请用新的提交。
+        {t("hist.intro")}
       </div>
-      {history.commits.length === 0 && <div className="empty">该节点暂无历史提交。</div>}
+      {history.commits.length === 0 && <div className="empty">{t("hist.empty")}</div>}
       {history.commits.map((c) => (
         <div
           className="hist-item"
@@ -907,7 +905,7 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
           </div>
           <div className="muted">
             {fmtTime(c.created_at)} · {c.actor}
-            {c.client_label ? `（${c.client_label}）` : ""}
+            {c.client_label ? t("hist.client.paren", { label: c.client_label }) : ""}
           </div>
         </div>
       ))}
@@ -915,7 +913,7 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
       {history.hasMore && (
         <div className="pager">
           <button onClick={() => history.onLoadMore?.()}>
-            加载更多（每页 20 条，最早 v{history.commits[history.commits.length - 1]?.revision} 之前）
+            {t("hist.loadmore", { v: history.commits[history.commits.length - 1]?.revision })}
           </button>
         </div>
       )}
@@ -932,7 +930,7 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
             <>
               {entry.type === "node.create" && (
                 <>
-                  <div className="hint ok">本提交创建了该节点。原始快照：</div>
+                  <div className="hint ok">{t("hist.created")}</div>
                   <CreateSnapshot entry={entry} />
                 </>
               )}
@@ -953,17 +951,17 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
               )}
               {entry.type === "node.move" && <MoveLine entry={entry} titleOf={history.titleOf} />}
               {(entry.type === "node.archive" || entry.type === "node.restore") && (
-                <div className="hint">{entry.type === "node.archive" ? "本提交归档了该节点。" : "本提交恢复了该节点。"}</div>
+                <div className="hint">{entry.type === "node.archive" ? t("hist.archived") : t("hist.restored")}</div>
               )}
             </>
           ) : (
-            <div className="muted">该提交不涉及本节点字段（可能是关系或顺序调整）。</div>
+            <div className="muted">{t("hist.notouch")}</div>
           )}
           <button
             style={{ marginTop: 8 }}
             onClick={() => navigator.clipboard.writeText(JSON.stringify(d, null, 2))}
           >
-            复制本次提交的 JSON
+            {t("hist.copy.json")}
           </button>
         </div>
       )}
@@ -972,19 +970,20 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
 }
 
 function CreateSnapshot({ entry }: { entry: ChangeEntry }) {
+  const t = useT();
   // B04: node.create entries must show the created snapshot (the `after`
   // object), not just "the node was created".
   const after = (entry.after ?? {}) as Record<string, unknown>;
   const all: [string, string][] = [
-    ["标题", s(after.title)],
-    ["类型", after.kind ? kindLabel(after.kind as NodeKind) ?? s(after.kind) : ""],
-    ["状态", after.status ? statusLabel(after.status as NodeStatus) ?? s(after.status) : ""],
-    ["摘要", s(after.summary)],
-    ["适用条件", s(after.scope)],
-    ["观察", s(after.finding)],
+    [t("fld.title"), s(after.title)],
+    [t("fld.kind"), after.kind ? kindLabel(after.kind as NodeKind) ?? s(after.kind) : ""],
+    [t("fld.status"), after.status ? statusLabel(after.status as NodeStatus) ?? s(after.status) : ""],
+    [t("fld.summary"), s(after.summary)],
+    [t("fld.scope"), s(after.scope)],
+    [t("snap.finding"), s(after.finding)],
   ];
   const rows = all.filter(([, v]) => v);
-  if (rows.length === 0) return <div className="muted">（快照字段缺失）</div>;
+  if (rows.length === 0) return <div className="muted">{t("snap.empty")}</div>;
   return (
     <div className="snap">
       {rows.map(([k, v]) => (
@@ -998,6 +997,7 @@ function CreateSnapshot({ entry }: { entry: ChangeEntry }) {
 }
 
 function MoveLine({ entry, titleOf }: { entry: ChangeEntry; titleOf?: (id: string) => string | null }) {
+  const t = useT();
   // B04: the backend stores node.move as before/after OBJECTS
   // ({parent_id, order_index}); legacy string fields are tolerated too.
   const before = (entry.before ?? {}) as Record<string, unknown>;
@@ -1012,13 +1012,13 @@ function MoveLine({ entry, titleOf }: { entry: ChangeEntry; titleOf?: (id: strin
   const idx = (o: Record<string, unknown>): number | null =>
     typeof o.order_index === "number" ? (o.order_index as number) : null;
   const label = (id: string | null): string =>
-    id == null ? "（一级）" : titleOf?.(id) ?? `${id.slice(0, 8)}…`;
+    id == null ? t("hist.top.level") : titleOf?.(id) ?? `${id.slice(0, 8)}…`;
   const bi = idx(before);
   const ai = idx(after);
   return (
     <div className="hint ok">
-      位置变更：父级 {label(bPid)} ⇒ {label(aPid)}
-      {bi != null || ai != null ? ` · 同级序号 ${bi ?? "—"} ⇒ ${ai ?? "—"}` : ""}
+      {t("hist.move", { before: label(bPid), after: label(aPid) })}
+      {bi != null || ai != null ? t("hist.move.order", { before: bi ?? "—", after: ai ?? "—" }) : ""}
     </div>
   );
 }

@@ -27,7 +27,7 @@ import { useT } from "../lib/i18n";
 import { replaceDeepLink } from "../lib/deeplink";
 import Canvas, { loadSavedView, saveView } from "./Canvas";
 import SidePanel, {
-  DRAFT_FIELD_LABEL,
+  draftFieldLabel,
   type Draft,
   type DraftConflict,
   draftOf,
@@ -245,7 +245,7 @@ export default function Workspace({
     const d = draftRef.current;
     const base = draftBaseRef.current;
     if (d && base && dirtyRef.current) {
-      const { merged, conflicts } = threeWayMerge(base, d, server, (f) => DRAFT_FIELD_LABEL[f]);
+      const { merged, conflicts } = threeWayMerge(base, d, server, draftFieldLabel);
       const next = preserveUndecided(conflicts, draftConflictsRef.current, merged, server);
       setDraft(merged);
       setDraftBase(server);

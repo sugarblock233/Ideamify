@@ -29,6 +29,7 @@ import { NodeCard, type CardData } from "./NodeCard";
 import { RootCard, type RootData } from "./RootCard";
 import { RelationEdge, makeRelEdge } from "./RelationEdge";
 import { deepLinkHref } from "../lib/deeplink";
+import { useT } from "../lib/i18n";
 
 export const nodeTypes = { card: NodeCard, root: RootCard };
 const edgeTypes = { relation: RelationEdge };
@@ -70,6 +71,7 @@ export interface CanvasProps {
 }
 
 function Inner(p: CanvasProps) {
+  const t = useT();
   const flow = useReactFlow();
   const readyRef = useRef(false);
   const [hoveredRel, setHoveredRel] = useState<string | null>(null);
@@ -405,24 +407,24 @@ function Inner(p: CanvasProps) {
       {p.pendingRevision != null && !bannerDismissed && (
         <div className="banner" role="status">
           <span>
-            有新的记录（服务器已更新到 <b>v{p.pendingRevision}</b>），是否载入？
+            {t("canvas.banner.pre")}<b>v{p.pendingRevision}</b>{t("canvas.banner.post")}
           </span>
           <button className="primary" onClick={p.onLoadUpdates}>
-            载入更新
+            {t("canvas.banner.load")}
           </button>
           <button
             onClick={() => setBannerDismissed(true)}
-            title="不打断当前阅读：待载入状态保留，之后可随时点提示载入"
+            title={t("canvas.banner.later.title")}
           >
-            稍后
+            {t("canvas.banner.later")}
           </button>
         </div>
       )}
       {p.pendingRevision != null && bannerDismissed && (
         <div className="banner pending-chip" role="status">
-          <span title="此前点击“稍后”，更新仍在等待载入">待载入更新 v{p.pendingRevision}</span>
-          <button className="primary" onClick={p.onLoadUpdates}>载入</button>
-          <button onClick={() => setBannerDismissed(false)} title="展开完整提示">▸</button>
+          <span title={t("canvas.chip.title")}>{t("canvas.chip.text", { n: p.pendingRevision })}</span>
+          <button className="primary" onClick={p.onLoadUpdates}>{t("canvas.chip.load")}</button>
+          <button onClick={() => setBannerDismissed(false)} title={t("canvas.chip.expand.title")}>▸</button>
         </div>
       )}
 
@@ -431,7 +433,7 @@ function Inner(p: CanvasProps) {
         if (!sel || sel.relation_count <= 0) return null;
         return (
           <div className="relcount-hint">
-            画布显示 {shownRels.length} / {sel.relation_count} 条关联（完整列表见右侧「关联」页）
+            {t("canvas.relcount", { shown: shownRels.length, total: sel.relation_count })}
           </div>
         );
       })()}
@@ -475,6 +477,7 @@ function Breadcrumbs({
   branchRoot: string;
   onBranchRoot: (id: string | null) => void;
 }) {
+  const t = useT();
   const byId = useMemo(() => new Map(graph.map((g) => [g.id, g])), [graph]);
   const chain: string[] = [];
   let cur = byId.get(branchRoot);
@@ -484,7 +487,7 @@ function Breadcrumbs({
   }
   return (
     <div className="breadcrumbs">
-      <a onClick={() => onBranchRoot(null)}>项目全景</a>
+      <a onClick={() => onBranchRoot(null)}>{t("canvas.breadcrumb.all")}</a>
       {chain.map((id, i) => (
         <React.Fragment key={id}>
           <span> / </span>
@@ -492,9 +495,9 @@ function Breadcrumbs({
           {void i}
         </React.Fragment>
       ))}
-      <span style={{ color: "#98a2b0" }}>（分支视图）</span>
+      <span style={{ color: "#98a2b0" }}>{t("canvas.breadcrumb.branch")}</span>
       <a
-        title="回到项目全景"
+        title={t("canvas.breadcrumb.back.title")}
         onClick={() => {
           onBranchRoot(null);
           window.history.pushState(null, "", deepLinkHref(projectId));
@@ -529,20 +532,21 @@ function CtxMenu({
   onToast: (msg: string, kind?: "ok" | "err") => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const n = graph.find((g) => g.id === menu.nodeId);
   if (!n) return null;
   const items: { label: string; run: () => void }[] = [
-    { label: "打开详情", run: () => { onSelect(n.id); onClose(); } },
-    { label: "新增子节点", run: () => { onAddChild(n.id); onClose(); } },
-    { label: folds.has(n.id) ? "展开此分支" : "折叠此分支", run: () => { onToggleFold(n.id); onClose(); } },
-    { label: "只看这一分支", run: () => { onBranchRoot(n.id); onClose(); } },
+    { label: t("ctx.open.details"), run: () => { onSelect(n.id); onClose(); } },
+    { label: t("ctx.add.child"), run: () => { onAddChild(n.id); onClose(); } },
+    { label: folds.has(n.id) ? t("ctx.expand.branch") : t("ctx.collapse.branch"), run: () => { onToggleFold(n.id); onClose(); } },
+    { label: t("ctx.only.branch"), run: () => { onBranchRoot(n.id); onClose(); } },
     {
-      label: "复制节点深链接",
+      label: t("ctx.copy.deeplink"),
       run: () => {
         navigator.clipboard
           .writeText(`${window.location.origin}${deepLinkHref(projectId, n.id)}`)
-          .then(() => onToast("深链接已复制", "ok"))
-          .catch(() => onToast("复制失败", "err"));
+          .then(() => onToast(t("ctx.deeplink.copied"), "ok"))
+          .catch(() => onToast(t("common.copy.fail"), "err"));
         onClose();
       },
     },

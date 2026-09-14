@@ -9,6 +9,7 @@ the sidebar first, the rest by relation id (deterministic).
 */
 
 import type { RelationItem } from "./types";
+import { t } from "./i18n";
 
 export const MAX_CANVAS_RELATION = 6;
 
@@ -66,15 +67,15 @@ export function relationLabel(r: RelationItem, selfTitle: string): string {
   const out = r.direction === "outgoing";
   switch (kind) {
     case "related":
-      return `相关：${r.other.title}`;
+      return t("rel.related.full", { title: r.other.title });
     case "motivates":
-      return out ? `本节点启发 ${r.other.title}` : `${r.other.title} 启发本节点`;
+      return t(out ? "rel.motivates.out" : "rel.motivates.in", { title: r.other.title });
     case "supports":
-      return out ? `本节点支持 ${r.other.title}` : `${r.other.title} 支持本节点`;
+      return t(out ? "rel.supports.out" : "rel.supports.in", { title: r.other.title });
     case "contradicts":
-      return out ? `本节点反对 ${r.other.title}` : `${r.other.title} 反对本节点`;
+      return t(out ? "rel.contradicts.out" : "rel.contradicts.in", { title: r.other.title });
     case "depends_on":
-      return out ? `本节点依赖 ${r.other.title}` : `${r.other.title} 依赖本节点`;
+      return t(out ? "rel.depends_on.out" : "rel.depends_on.in", { title: r.other.title });
   }
   void selfTitle;
   return kind;

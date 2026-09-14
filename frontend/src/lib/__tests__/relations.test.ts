@@ -9,7 +9,12 @@ import {
   relationLabel,
   selectCanvasRelations,
 } from "../relations";
+import { setLang } from "../i18n";
 import type { RelationItem, RelationKind } from "../types";
+
+// jsdom reports navigator.language = "en-US", which would resolve the initial
+// language to en; these assertions pin the Chinese wording, so lock zh first.
+setLang("zh");
 
 function rel(
   id: string,

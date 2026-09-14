@@ -8,6 +8,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CARD_W, CARD_H } from "../lib/layout";
 import { STATUS_COLOR, kindLabel, statusLabel } from "../lib/format";
 import type { GraphNode } from "../lib/types";
+import { useT } from "../lib/i18n";
 
 export interface CardData extends Record<string, unknown> {
   node: GraphNode;
@@ -22,6 +23,7 @@ export interface CardData extends Record<string, unknown> {
 
 export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
   const selected = props.selected;
+  const t = useT();
   const d = props.data as CardData;
   const n = d.node;
 
@@ -52,13 +54,13 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
           <span className="dot" style={{ background: STATUS_COLOR[n.status] }} />
           {statusLabel(n.status)}
         </span>
-        {n.archived && <span className="arch-pill">已归档</span>}
+        {n.archived && <span className="arch-pill">{t("node.archived")}</span>}
       </div>
       <div className="title" title={n.title}>{n.title}</div>
-      <div className="summary" title={n.summary}>{n.summary || "（无摘要）"}</div>
+      <div className="summary" title={n.summary}>{n.summary || t("node.no.summary")}</div>
       <div className="row3">
-        <span>子 {n.child_count}</span>
-        <span>关联 {n.relation_count}</span>
+        <span>{t("node.children.count", { n: n.child_count })}</span>
+        <span>{t("node.relations.count", { n: n.relation_count })}</span>
         <span className="tags">
           {n.tags.slice(0, 3).map((t) => (
             <span className="tag" key={t}>{t}</span>
@@ -67,18 +69,18 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
       </div>
       {(d.mark === "new" || d.mark === "changed") && (
         <span className={d.mark === "new" ? "new-badge" : "update-badge"}>
-          {d.mark === "new" ? "新增" : "已更新"}
+          {d.mark === "new" ? t("node.mark.new") : t("node.mark.changed")}
         </span>
       )}
       {d.badgeCount ? (
         <span className="update-badge" style={{ right: d.mark ? 64 : 12 }}>
-          分支内有更新 {d.badgeCount}
+          {t("node.badge.updates", { n: d.badgeCount })}
         </span>
       ) : null}
       {d.hasChildren && (
         <button
           className="fold-btn"
-          title={d.folded ? `展开分支（隐藏 ${d.hiddenCount} 个直接子节点）` : "折叠分支"}
+          title={d.folded ? t("node.fold.expand.title", { n: d.hiddenCount }) : t("node.fold.collapse.title")}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
