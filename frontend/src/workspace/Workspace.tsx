@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api, { uuidv4 } from "../lib/api";
+import { initialFolds } from "../lib/layout";
 import {
   ApiError,
   type CommitItem,
@@ -58,6 +59,9 @@ export default function Workspace({
   const [nodeLoading, setNodeLoading] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftBase, setDraftBase] = useState<Draft | null>(null);
+  /** A02: the project revision the draft was read at — commits of this draft
+   *  must use THIS baseline, never a later global revision. */
+  const [draftBaseRev, setDraftBaseRev] = useState<number | null>(null);
   const [draftErr, setDraftErr] = useState<string | null>(null);
   const [conflictRev, setConflictRev] = useState<number | null>(null);
 
@@ -68,6 +72,9 @@ export default function Workspace({
 
   const [commits, setCommits] = useState<CommitItem[]>([]);
   const [commitDetail, setCommitDetail] = useState<import("../lib/types").CommitDetail | null>(null);
+  const [histNodeId, setHistNodeId] = useState<string | null>(null);
+  const [commitCursor, setCommitCursor] = useState<string | null>(null);
+  const [commitHasMore, setCommitHasMore] = useState(false);
 
   const saved0 = useMemo(() => loadSavedView(pid), [pid]);
   const [folds, setFoldsRaw] = useState<ReadonlySet<string>>(new Set(saved0.folds));
@@ -86,7 +93,9 @@ export default function Workspace({
   const [toast, setToast] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
 
   const [createNodeParent, setCreateNodeParent] = useState<string | null | undefined>(undefined);
+  const [createNodeErr, setCreateNodeErr] = useState<string | null>(null);
   const [modalProject, setModalProject] = useState<"" | "create" | "edit">("");
+  const [aiAccessOpen, setAiAccessOpen] = useState(false);
   const [createRelFrom, setCreateRelFrom] = useState<string | null>(null);
   const [recentOpen, setRecentOpen] = useState(false);
   const [recentCommits, setRecentCommits] = useState<CommitItem[]>([]);
@@ -110,6 +119,15 @@ export default function Workspace({
   useEffect(() => {
     projRef.current = project;
   }, [project]);
+  const dirtyRef = useRef(false);
+  const draftRef = useRef<Draft | null>(null);
+  const draftBaseRef = useRef<Draft | null>(null);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  useEffect(() => {
+    draftBaseRef.current = draftBase;
+  }, [draftBase]);
 
   const dirty = useMemo(
     () =>
@@ -120,6 +138,14 @@ export default function Workspace({
       ),
     [draft, draftBase],
   );
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
+  /** A02: dirty draft was read at a revision older than the server's — saving
+   *  now would squash commits made in between; the user must rebase first. */
+  const draftStale =
+    !!dirty && draftBaseRev != null && (project?.revision ?? 0) > draftBaseRev;
 
   const ironToast = useCallback((msg: string, kind: "ok" | "err" = "ok") => {
     setToast({ msg, kind });
@@ -147,11 +173,14 @@ export default function Workspace({
   );
 
   const loadNodeCommits = useCallback(
-    async (id: string) => {
+    async (id: string, cursor: string | null = null, append: boolean = false) => {
       try {
-        const r = await api.commits(pid, { nodeId: id, limit: 20 });
-        setCommits(r.items);
-        setCommitDetail(null);
+        const r = await api.commits(pid, { nodeId: id, limit: 20, cursor: cursor ?? undefined });
+        if (!append) setHistNodeId(id);
+        setCommits((prev) => (append ? [...prev, ...r.items] : r.items));
+        setCommitCursor(r.next_cursor ?? null);
+        setCommitHasMore(r.has_more);
+        if (!append) setCommitDetail(null);
       } catch {
         /* history is optional */
       }
@@ -169,14 +198,33 @@ export default function Workspace({
       try {
         const nf = await api.node(pid, sel);
         setNode(nf);
+        setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
+        // A02: a dirty draft is rebased (silently) onto the fresh snapshot —
+        // user-edited fields keep the user's value; a clean draft resets to
+        // the server's, and the baseline revision is re-pinned either way.
+        const d = draftRef.current;
+        const base = draftBaseRef.current;
+        if (d && base && dirtyRef.current) {
+          const server = draftOf(nf);
+          const { merged } = threeWayMerge(base, d, server);
+          setDraft(merged);
+          setDraftBase(server);
+        } else {
+          const d0 = draftOf(nf);
+          setDraft(d0);
+          setDraftBase(d0);
+        }
+        setDraftBaseRev(nf.project_revision);
       } catch {
         setNode(null);
         setDraft(null);
         setDraftBase(null);
+        setDraftBaseRev(null);
       }
       await loadNodeRelations(sel, incArchRef.current, null, false);
+      loadNodeCommits(sel);
     }
-  }, [pid, loadNodeRelations]);
+  }, [pid, loadNodeRelations, loadNodeCommits]);
 
   /* -------------------------------- selection ----------------------------- */
 
@@ -190,15 +238,26 @@ export default function Workspace({
   const selectNode = useCallback(
     async (id: string, opts: { locate?: boolean; silent?: boolean } = {}) => {
       if (!guardLeave(id)) return;
+      if (id === selectedId && node) {
+        // A02: re-clicking the current node must never wipe a live draft —
+        // it just re-centers the canvas.
+        if (!opts.silent) replaceDeepLink(pid, id);
+        setPendingLocate({ nodeId: id });
+        return;
+      }
       setSelectedId(id);
       setSelectedRelationId(null);
       setTab("detail");
       setNode(null);
       setDraft(null);
       setDraftBase(null);
+      setDraftBaseRev(null);
       setDraftErr(null);
       setRelations([]);
+      setCommits([]);
       setCommitDetail(null);
+      setCommitCursor(null);
+      setCommitHasMore(false);
       if (!opts.silent) replaceDeepLink(pid, id);
       setNodeLoading(true);
       try {
@@ -207,8 +266,9 @@ export default function Workspace({
         const d0 = draftOf(nf);
         setDraft(d0);
         setDraftBase(d0);
-        const proj = await api.project(pid);
-        setProject((p) => (p ? { ...p, revision: proj.revision } : p));
+        // A02: pin the draft to the revision it was actually read from.
+        setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
+        setDraftBaseRev(nf.project_revision);
       } catch (e) {
         ironToast(e instanceof ApiError ? e.message : "节点加载失败", "err");
       } finally {
@@ -219,7 +279,7 @@ export default function Workspace({
       if (opts.locate) setPendingLocate({ nodeId: id });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pid, ironToast, loadNodeRelations, loadNodeCommits, dirty],
+    [pid, ironToast, loadNodeRelations, loadNodeCommits, dirty, selectedId, node],
   );
 
   const clearSelection = useCallback(() => {
@@ -296,7 +356,47 @@ export default function Workspace({
         setProject({ ...proj, objective: proj.objective ?? "" } as Project);
         setGraph(g.nodes);
         setGraphLoaded(true);
-        if (selectedRef.current) void selectNode(selectedRef.current);
+        // A03: first open (no saved view at all) → show only the virtual root
+        // plus the first two business levels (fold every depth ≥ 2 node).
+        let initFolds = new Set(saved0.folds);
+        if (saved0.folds.length === 0 && saved0.viewport === null) {
+          initFolds = initialFolds(g.nodes);
+        }
+        if (selectedRef.current) {
+          const id = selectedRef.current;
+          const byId = new Map(g.nodes.map((n) => [n.id, n]));
+          const exists = byId.has(id);
+          if (exists) {
+            // A07: a node deep link outranks the saved view — expand the
+            // target's ancestors and clear a branch focus it isn't in.
+            const next = new Set(initFolds);
+            let cur = byId.get(id);
+            while (cur?.parent_id) {
+              next.delete(cur.parent_id);
+              cur = byId.get(cur.parent_id);
+            }
+            setFoldsRaw(next);
+            if (branchRoot) {
+              let c: GraphNode | undefined = byId.get(id);
+              let inBranch = false;
+              while (c) {
+                if (c.id === branchRoot) {
+                  inBranch = true;
+                  break;
+                }
+                c = c.parent_id ? byId.get(c.parent_id) : undefined;
+              }
+              if (!inBranch) setBranchRoot(null);
+            }
+            void selectNode(id, { locate: true });
+          } else {
+            // deep link to a missing (possibly archived) node: warn only
+            setFoldsRaw(initFolds);
+            void selectNode(id, { locate: false });
+          }
+        } else {
+          setFoldsRaw(initFolds);
+        }
       } catch (e) {
         ironToast(e instanceof ApiError ? e.message : "加载失败", "err");
       } finally {
@@ -371,9 +471,23 @@ export default function Workspace({
           const nf = await api.node(pid, selectedRef.current);
           setNode(nf);
           setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
-          // T22: an in-progress draft is kept as-is; the user can then
-          // "载入新版并重排草稿" (rebaseDraft) before saving.
-          setDraft((d) => (d ? d : draftOf(nf)));
+          // A02/T22: an explicit "载入更新" rebases the live draft onto the new
+          // snapshot — user-edited fields keep the user's value; overlapping
+          // edits are surfaced, never applied silently. A clean draft resets.
+          const d = draftRef.current;
+          const base = draftBaseRef.current;
+          const server = draftOf(nf);
+          if (d && base && dirtyRef.current) {
+            const { merged, conflicts } = threeWayMerge(base, d, server);
+            setDraft(merged);
+            setDraftBase(server);
+            if (conflicts.length)
+              setDraftErr(`以下字段你与他人同时修改，已保留你的值，请核对后保存：${conflicts.join("、")}`);
+          } else {
+            setDraft(server);
+            setDraftBase(server);
+          }
+          setDraftBaseRev(nf.project_revision);
         } catch {
           /* node may have been archived away; next selection will 404-warn */
         }
@@ -386,29 +500,22 @@ export default function Workspace({
     }
   }
 
-  /** Three-way merge of the local draft onto the refreshed node:
-   *  user-edited fields keep the user's value; untouched fields take the
-   *  server's new value. Overlapping edits are reported, never silent. */
-  async function rebaseDraft() {
+  /** Three-way merge of the local draft onto a refreshed snapshot (A02):
+ *  user-edited fields keep the user's value; untouched fields take the
+ *  server's new value. Overlapping edits are reported, never silent. */
+async function rebaseDraft() {
     const sel = selectedId;
-    if (!sel || !draft || !draftBase) return;
+    const d = draft;
+    const base = draftBase;
+    if (!sel || !d || !base) return;
     try {
       const nf = await api.node(pid, sel);
-      const serverDraft = draftOf(nf);
-      const conflicts: string[] = [];
-      const merged = { ...serverDraft } as Draft;
-      for (const k of Object.keys(serverDraft) as (keyof Draft)[]) {
-        const oldV = JSON.stringify(draftBase[k]);
-        const userV = JSON.stringify(draft[k]);
-        const srvV = JSON.stringify(serverDraft[k]);
-        if (userV !== oldV) {
-          (merged as Partial<Record<keyof Draft, unknown>>)[k] = draft[k];
-          if (srvV !== oldV) conflicts.push(k);
-        }
-      }
+      const server = draftOf(nf);
+      const { merged, conflicts } = threeWayMerge(base, d, server);
       setNode(nf);
       setDraft(merged);
-      setDraftBase(serverDraft);
+      setDraftBase(server);
+      setDraftBaseRev(nf.project_revision);
       setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
       setConflictRev(null);
       setDraftErr(
@@ -424,13 +531,19 @@ export default function Workspace({
 
   /* -------------------------------- commits ------------------------------- */
 
-  async function commit(ops: CommitOp[], summary: string): Promise<CommitResponse | null> {
+  async function commit(
+    ops: CommitOp[],
+    summary: string,
+    opts: { baseRev?: number; onFail?: (e: unknown) => void } = {},
+  ): Promise<CommitResponse | null> {
     const base = projRef.current;
     if (!base) return null;
     try {
       const res = await api.commit(pid, {
         request_id: uuidv4(),
-        expected_revision: base.revision,
+        // A02: node updates commit against the draft's own baseline revision,
+        // everything else against the currently loaded project revision.
+        expected_revision: opts.baseRev ?? base.revision,
         summary,
         client_label: "researchmap-ui",
         operations: ops,
@@ -448,6 +561,10 @@ export default function Workspace({
         ironToast("版本冲突（已有他人提交）", "err");
         return null;
       }
+      if (opts.onFail) {
+        opts.onFail(e);
+        return null;
+      }
       if (e instanceof ApiError) {
         const missing = e.details["missing"];
         setDraftErr(
@@ -463,29 +580,28 @@ export default function Workspace({
 
   const saveDraft = useCallback(async () => {
     if (!node || !draft || !draftBase || !dirty) return;
+    if (draftStale) {
+      ironToast(
+        `草稿基于 v${draftBaseRev}，服务器已是 v${project?.revision}：先点“载入新版并重排草稿”再保存`,
+        "err",
+      );
+      return;
+    }
     const fields = diffDraft(draftBase, draft);
     if (Object.keys(fields).length === 0) return;
+    // A02: commit against the revision this draft was read from.
     const res = await commit(
       [{ op: "node.update", id: node.id, fields }],
       `更新节点：${draft.title}`,
+      { baseRev: draftBaseRev ?? undefined },
     );
     if (res) {
       setDraftErr(null);
       ironToast(`已保存（v${res.revision}）`, "ok");
     }
-    // after syncAll the node refetch also needs a fresh draft base
-    if (res && selectedRef.current === node.id) {
-      try {
-        const nf = await api.node(pid, node.id);
-        const d0 = draftOf(nf);
-        setDraft(d0);
-        setDraftBase(d0);
-      } catch {
-        /* keep draft */
-      }
-    }
+    // on success syncAll() already re-pins the draft base (or rebases it)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node, draft, draftBase, dirty, pid, ironToast]);
+  }, [node, draft, draftBase, dirty, draftBaseRev, draftStale, project, pid, ironToast]);
 
   const discardDraft = useCallback(() => {
     if (draftBase) setDraft(draftBase);
@@ -506,9 +622,29 @@ export default function Workspace({
       tags: form.tags,
       ...(parent ? { parent_id: parent } : {}),
     };
-    const res = await commit([op], `新增${parent ? "子节点" : "一级路线"}：${form.title}`);
+    // A06: supported / not_supported 需要 scope / finding / decision + ≥1 证据
+    // （与服务端 _check_confirmed 同一闸口，前端先行拦截）。
+    const scope = form.scope?.trim();
+    const finding = form.finding?.trim();
+    const decision = form.decision?.trim();
+    if (scope) op.scope = scope;
+    if (finding) op.finding = finding;
+    if (decision) op.decision = decision;
+    const evs = form.evidence?.filter((e) => e.label.trim() || e.value.trim());
+    if (evs && evs.length > 0) op.evidence = evs.map((e) => ({ ...e }));
+    const res = await commit([op], `新增${parent ? "子节点" : "一级路线"}：${form.title}`, {
+      onFail: (e) => {
+        const msg = e instanceof ApiError ? e.message : String(e);
+        const missing = e instanceof ApiError ? e.details["missing"] : undefined;
+        setCreateNodeErr(
+          `${msg}${Array.isArray(missing) ? `（缺失：${(missing as string[]).join("、")}）` : ""}`,
+        );
+        ironToast(e instanceof ApiError ? e.message : "创建失败", "err");
+      },
+    });
     if (res) {
       setCreateNodeParent(undefined);
+      setCreateNodeErr(null);
       ironToast(`已创建（v${res.revision}）`, "ok");
       void selectNode(id, { locate: true });
     }
@@ -519,20 +655,18 @@ export default function Workspace({
   const parentOptions = useMemo(() => {
     if (!node) return [];
     const byId = new Map(graph.map((n) => [n.id, n]));
+    // B04: exclude ONLY the node itself and its descendants — every ancestor
+    // (including the current parent) is a legal move target, which is what
+    // upward moves need.
     const excluded = new Set<string>([node.id]);
-    let cur = graph.find((n) => n.id === node.id);
-    while (cur) {
-      excluded.add(cur.id);
-      cur = cur.parent_id ? byId.get(cur.parent_id) && byId.get(cur.parent_id)! : undefined;
-    }
-    // also exclude node's descendants
     const stack = [node.id];
     while (stack.length) {
       const x = stack.pop()!;
-      for (const n of graph) if (n.parent_id === x) {
-        excluded.add(n.id);
-        stack.push(n.id);
-      }
+      for (const n of graph)
+        if (n.parent_id === x && !excluded.has(n.id)) {
+          excluded.add(n.id);
+          stack.push(n.id);
+        }
     }
     const pathOf = (id: string): string => {
       const parts: string[] = [];
@@ -715,18 +849,28 @@ export default function Workspace({
         onNewRoot={() => setCreateNodeParent(null)}
         onFit={() => setFitSignal((n) => n + 1)}
         onManualRefresh={() => {
+          // A08: 手动刷新必须检测服务器是否真的更新——落后就按更新流程载入，
+          // 未落后才提示“无变化”。
           if (pendingRev != null) void loadUpdates();
-          else void (async () => {
-            try {
-              const p2 = await api.project(pid);
-              setProject((p) => (p ? { ...p, revision: p2.revision } : p));
-              ironToast("记录目前无变化", "ok");
-            } catch (e) {
-              ironToast(e instanceof ApiError ? e.message : "刷新失败", "err");
-            }
-          })();
+          else
+            void (async () => {
+              try {
+                const p2 = await api.project(pid);
+                const loaded = projRef.current?.revision ?? 0;
+                if (p2.revision > loaded) {
+                  setPendingRev(p2.revision);
+                  await loadUpdates();
+                } else {
+                  setProject((p) => (p ? { ...p, revision: p2.revision } : p));
+                  ironToast("记录目前无变化", "ok");
+                }
+              } catch (e) {
+                ironToast(e instanceof ApiError ? e.message : "刷新失败", "err");
+              }
+            })();
         }}
         onExport={() => void exportProject()}
+        onShowAiAccess={() => setAiAccessOpen(true)}
         onExit={onExit}
         search={searchProp}
         recent={{ open: recentOpen, commits: recentCommits, toggle: () => void openRecent(), onPick: pickRecent }}
@@ -771,6 +915,8 @@ export default function Workspace({
           draft={draft}
           setDraft={setDraft}
           dirty={dirty}
+          draftStale={draftStale}
+          draftBaseRev={draftBaseRev}
           draftErr={draftErr}
           onDiscardDraft={discardDraft}
           onSave={() => void saveDraft()}
@@ -819,6 +965,11 @@ export default function Workspace({
           history={{
             commits,
             detail: commitDetail,
+            hasMore: commitHasMore,
+            onLoadMore: () => {
+              if (commitCursor && histNodeId) loadNodeCommits(histNodeId, commitCursor, true);
+            },
+            titleOf: (id: string) => graph.find((g) => g.id === id)?.title ?? null,
             onSelect: async (c: CommitItem) => {
               try {
                 setCommitDetail(await api.commitDetail(pid, c.id));
@@ -833,8 +984,12 @@ export default function Workspace({
       {createNodeParent !== undefined && (
         <CreateNodeModal
           parentLabel={createNodeParent ? nodeTitleById(graph, createNodeParent) : "（项目一级节点）"}
-          onClose={() => setCreateNodeParent(undefined)}
-          onCreate={(form) => void createNodeAction(createNodeParent, form)}
+          err={createNodeErr}
+          onClose={() => {
+            setCreateNodeParent(undefined);
+            setCreateNodeErr(null);
+          }}
+          onCreate={(form) => createNodeAction(createNodeParent, form)}
         />
       )}
       {modalProject !== "" && project && (
@@ -872,11 +1027,32 @@ export default function Workspace({
           onCreate={(t, k, r) => void createRelationAction(t, k, r)}
         />
       )}
+      {aiAccessOpen && project && (
+        <AiAccessModal project={project} pid={pid} onClose={() => setAiAccessOpen(false)} onToast={ironToast} />
+      )}
     </div>
   );
 }
 
 /* helpers */
+
+/** Three-way merge used by rebaseDraft and post-commit sync (A02).
+ *  User-edited fields keep the user's value; untouched fields take the
+ *  server's new value; overlapping edits are reported back for display. */
+function threeWayMerge(base: Draft, user: Draft, server: Draft): { merged: Draft; conflicts: string[] } {
+  const conflicts: string[] = [];
+  const merged = { ...server } as Draft;
+  for (const k of Object.keys(server) as (keyof Draft)[]) {
+    const oldV = JSON.stringify(base[k]);
+    const userV = JSON.stringify(user[k]);
+    const srvV = JSON.stringify(server[k]);
+    if (userV !== oldV) {
+      (merged as Partial<Record<keyof Draft, unknown>>)[k] = user[k];
+      if (srvV !== oldV) conflicts.push(k);
+    }
+  }
+  return { merged, conflicts };
+}
 
 function emptyMarks() {
   return {
@@ -908,23 +1084,65 @@ export interface NewNodeForm {
   summary: string;
   status: import("../lib/types").NodeStatus;
   tags: string[];
+  /** A06: required by the backend for supported / not_supported nodes. */
+  scope?: string;
+  finding?: string;
+  decision?: string;
+  evidence?: { kind: "inline" | "url" | "path"; label: string; value: string; note: string }[];
 }
 
 function CreateNodeModal({
   parentLabel,
+  err,
   onClose,
   onCreate,
 }: {
   parentLabel: string;
+  err: string | null;
   onClose: () => void;
-  onCreate: (f: NewNodeForm) => void;
+  onCreate: (f: NewNodeForm) => void | Promise<void>;
 }) {
   const [kind, setKind] = useState<import("../lib/types").NodeKind>("idea");
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [status, setStatus] = useState<import("../lib/types").NodeStatus>("unexplored");
   const [tags, setTags] = useState("");
-  const valid = title.trim().length >= 1 && title.trim().length <= 80;
+  const [scope, setScope] = useState("");
+  const [finding, setFinding] = useState("");
+  const [decision, setDecision] = useState("");
+  const [ev, setEv] = useState<{ kind: "inline" | "url" | "path"; label: string; value: string; note: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const gated = status === "supported" || status === "not_supported";
+  const baseValid = title.trim().length >= 1 && title.trim().length <= 80;
+  const gatedValid =
+    !gated ||
+    (!!scope.trim() &&
+      !!finding.trim() &&
+      !!decision.trim() &&
+      ev.some((e) => e.label.trim() || e.value.trim()));
+  const valid = baseValid && gatedValid;
+  const submit = () => {
+    setBusy(true);
+    void Promise.resolve(
+      onCreate({
+        kind,
+        title: title.trim(),
+        summary: summary.trim(),
+        status,
+        tags: tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean).slice(0, 10),
+        ...(gated
+          ? {
+              scope: scope.trim(),
+              finding: finding.trim(),
+              decision: decision.trim(),
+              evidence: ev.map((e) => ({ ...e })),
+            }
+          : {}),
+      }),
+    ).finally(() => setBusy(false));
+  };
+  const setEvRow = (i: number, patch: Partial<{ kind: "inline" | "url" | "path"; label: string; value: string; note: string }>) =>
+    setEv((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
     <Modal title={`新增节点 · 父级：${parentLabel}`} onClose={onClose}>
       <div style={{ display: "flex", gap: 8 }}>
@@ -946,22 +1164,43 @@ function CreateNodeModal({
       <textarea value={summary} maxLength={280} onChange={(e) => setSummary(e.target.value)} style={{ width: "100%" }} />
       <label className="field">标签（逗号分隔）</label>
       <input value={tags} onChange={(e) => setTags(e.target.value)} style={{ width: "100%" }} />
+      {gated && (
+        <div className="gated-fields">
+          <div className="hint">
+            状态为「受支持／不支持」时，必须给出适用条件、发现与决定，并至少 1 条证据（与服务端同一闸口）。
+          </div>
+          <label className="field">适用条件 scope（必填，≤1000）</label>
+          <textarea value={scope} maxLength={1000} onChange={(e) => setScope(e.target.value)} style={{ width: "100%" }} placeholder="该结论适用于哪些材料 / 工艺 / 条件" />
+          <label className="field">发现 finding（必填，≤2000）</label>
+          <textarea value={finding} maxLength={2000} onChange={(e) => setFinding(e.target.value)} style={{ width: "100%" }} placeholder="观察到的事实与结果，尽量定量" />
+          <label className="field">决定 decision（必填，≤2000）</label>
+          <textarea value={decision} maxLength={2000} onChange={(e) => setDecision(e.target.value)} style={{ width: "100%" }} placeholder="采纳 / 放弃 / 修改什么条件，以及为什么" />
+          <label className="field">证据（≥1 条）</label>
+          {ev.map((e, i) => (
+            <div className="evid-row gated-ev" key={i}>
+              <select value={e.kind} onChange={(evn) => setEvRow(i, { kind: evn.target.value as "inline" | "url" | "path" })}>
+                <option value="inline">行内记录</option>
+                <option value="url">url</option>
+                <option value="path">路径</option>
+              </select>
+              <input value={e.label} maxLength={80} onChange={(evn) => setEvRow(i, { label: evn.target.value })} placeholder="名称" />
+              <input value={e.value} maxLength={2000} onChange={(evn) => setEvRow(i, { value: evn.target.value })} placeholder={e.kind === "url" ? "https://…" : e.kind === "path" ? "相对仓库路径" : "内容"} />
+              <button type="button" title="删除这条证据" onClick={() => setEv((rows) => rows.filter((_, j) => j !== i))}>✕</button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => setEv((rows) => [...rows, { kind: "inline", label: "", value: "", note: "" }])}
+          >
+            ＋ 添加证据
+          </button>
+        </div>
+      )}
+      {err && <div className="form-err">{err}</div>}
       <div className="mrow">
-        <button onClick={onClose}>取消</button>
-        <button
-          className="primary"
-          disabled={!valid}
-          onClick={() =>
-            onCreate({
-              kind,
-              title: title.trim(),
-              summary: summary.trim(),
-              status,
-              tags: tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean).slice(0, 10),
-            })
-          }
-        >
-          创建
+        <button onClick={onClose} disabled={busy}>取消</button>
+        <button className="primary" disabled={!valid || busy} onClick={submit}>
+          {busy ? "创建中…" : "创建"}
         </button>
       </div>
     </Modal>
@@ -1066,6 +1305,62 @@ function CreateRelationModal({
       </div>
       <div className="muted" style={{ marginTop: 8, fontSize: 11 }}>
         新增 supports / contradicts 不会自动改变任何节点状态；状态只能由研究者显式填写。
+      </div>
+    </Modal>
+  );
+}
+
+function AiAccessModal({
+  project,
+  pid,
+  onClose,
+  onToast,
+}: {
+  project: Project;
+  pid: string;
+  onClose: () => void;
+  onToast: (msg: string, kind?: "ok" | "err") => void;
+}) {
+  const origin = window.location.origin;
+  const block = [
+    `服务器：${origin}（Authorization: Bearer <你的令牌>）`,
+    `项目名称：${project.name}`,
+    `项目 ID：${pid}`,
+    `身份：每条提交的 actor 为令牌名（token_name），无法伪造`,
+    "",
+    "# 一次性配置（令牌只走环境变量，永不写进文件 / 日志 / 命令行参数）",
+    `export RESEARCHMAP_BASE_URL="${origin}"`,
+    `export RESEARCHMAP_TOKEN="<你的令牌>"`,
+    "",
+    "# 读取当前状态（不改数据）：聚焦某节点，或用关键词",
+    `python3 tools/researchmap.py context ${pid} [--focus <节点ID>] [--q <关键词>]`,
+    "",
+    "# 提交修改（请求文件必须含完整 request_id + expected_revision；先 dry_run 校验）",
+    `python3 tools/researchmap.py commit ${pid} request.json`,
+    "",
+    "# 409 冲突 = 期间有人提交了同一对象：重读基线、重新叠加你的增量，再用同一 request_id 重提",
+    "# 完整规范：docs/AI_USAGE.md（英文主入口）/ docs/AI_USAGE.zh-CN.md",
+  ].join("\n");
+  return (
+    <Modal title="AI 接入说明" onClose={onClose}>
+      <p className="muted">
+        AI 与浏览器走同一条提交协议，不需要模型 API Key；所有持令牌者属于同一个受信任空间。
+      </p>
+      <pre className="aiaccess-pre">{block}</pre>
+      <div className="mrow">
+        <button
+          onClick={() =>
+            navigator.clipboard
+              .writeText(block)
+              .then(() => onToast("接入信息已复制", "ok"))
+              .catch(() => onToast("复制失败", "err"))
+          }
+        >
+          复制接入信息
+        </button>
+        <button className="primary" onClick={onClose}>
+          关闭
+        </button>
       </div>
     </Modal>
   );
