@@ -452,6 +452,57 @@ for resp in (j2, j):
 check("A04-d: continuations are executable queries (all -> 200)",
       ran_d > 0 and ok_d, extra_d or f"ran {ran_d} continuations")
 
+# (e) R05: the meta is part of the payload, so the budget has to be enforced on
+# the response that actually ships. This shape emits all four distinct
+# continuation URLs at once — and a 100-char q (the endpoint's maximum) makes
+# the search one ~9x its length once percent-encoded — so the real meta exceeds
+# META_RESERVE. The old trim pass measured `out` before the meta was populated,
+# never fired, and returned 4092 chars for max_chars=4000.
+LONGQ = ("长关键词复现预算元信息溢出的场景与说明文字用于撑大续读指引与警告文本" * 3)[:100]
+pbig = c.post("/api/v1/projects", json={"request_id": U(), "name": "R05 预算元信息",
+              "objective": "元信息本身很大时的预算纪律（合成数据）"}).json()["id"]
+broot, bfoc = U(), U()
+rev_b = 0
+r = commit_to(pbig, [
+    {"op": "node.create", "id": broot, "kind": "question", "title": "根路线", "summary": LONGQ},
+    {"op": "node.create", "id": bfoc, "parent_id": broot, "kind": "idea", "title": "焦点",
+     "summary": LONGQ, "scope": "适用条件" * 60, "finding": "直接观察" * 60,
+     "decision": "当前决定" * 60, "tags": ["标签甲", "标签乙"], "status": "in_progress"},
+], rev_b, summary="R05 骨架"); rev_b += 1
+bpartners = [U() for _ in range(8)]
+r = commit_to(pbig, [
+    *[{"op": "node.create", "id": U(), "parent_id": broot, "kind": "attempt",
+       "title": f"先前尝试{i}", "summary": LONGQ, "status": "inconclusive"} for i in range(8)],
+    *[{"op": "node.create", "id": U(), "parent_id": bfoc, "kind": "idea",
+       "title": f"开放{i}", "summary": LONGQ, "status": "unexplored"} for i in range(8)],
+    *[{"op": "node.create", "id": n, "parent_id": broot, "kind": "idea",
+       "title": f"关联对象{i}", "summary": LONGQ, "status": "in_progress"}
+      for i, n in enumerate(bpartners)],
+], rev_b, summary="R05 分组内容"); rev_b += 1
+r = commit_to(pbig, [{"op": "relation.create", "id": U(), "source_id": bfoc, "target_id": n,
+                      "kind": "contradicts", "reason": "理由" * 30} for n in bpartners],
+              rev_b, summary="R05 关联"); rev_b += 1
+for i in range(8):  # >5 commits so recent_changes also has to omit
+    r = commit_to(pbig, [{"op": "node.update", "id": bfoc, "fields": {"summary": LONGQ + f"#{i}"}}],
+                  rev_b, summary="改动" * 40); rev_b += 1
+check("A04-e seed: meta-heavy project ready", r.status_code == 200, r.text[:200])
+
+worst = []
+for mc in (4000, 4030, 4500, 5000, 6000, 8000, 12000):
+    rr = c.get(f"/api/v1/projects/{pbig}/context",
+               params={"q": LONGQ, "focus_node_id": bfoc, "max_chars": mc})
+    if rr.status_code != 200:
+        worst.append((mc, rr.status_code, rr.text[:120])); continue
+    n = compact_len(rr.json())
+    if n > mc:
+        worst.append((mc, n, n - mc))
+check("A04-e/R05: meta-heavy context never exceeds max_chars", not worst, str(worst)[:300])
+j7 = c.get(f"/api/v1/projects/{pbig}/context",
+           params={"q": LONGQ, "focus_node_id": bfoc, "max_chars": 4000}).json()
+check("A04-e/R05: and the trimmed response still reports what it withheld",
+      j7["truncated"] is True and bool(j7["omitted_counts"]) and bool(j7["continuations"]),
+      f"omitted={j7.get('omitted_counts')} cont={len(j7.get('continuations', []))}")
+
 # CONTEXT_BUDGET_TOO_SMALL must report the observed minimum (p2: giant objective)
 r6 = c.get(f"/api/v1/projects/{p2}/context", params={"focus_node_id": n2, "max_chars": 4000})
 d6 = r6.json().get("error", {}).get("details", {})
@@ -555,17 +606,27 @@ check("B04-s2: search pages 5/5/2 without overlap, closes cleanly",
       and js3["next_cursor"] is None
       and len({x["id"] for x in js1["items"] + js2["items"] + js3["items"]}) == 12,
       f"{len(js2['items'])}/{len(js3['items'])}")
-# project list pagination (SPEC: default max 50, cursor paging)
-rp1 = c.get("/api/v1/projects", params={"limit": 2})
-jp1 = rp1.json()
-rp2 = c.get("/api/v1/projects", params={"limit": 2, "cursor": jp1["next_cursor"]})
-jp2 = rp2.json()
-check("B04-p1: project list pages 2/2, disjoint, has_more correct",
-      rp1.status_code == 200 and rp2.status_code == 200
-      and len(jp1["items"]) == 2 and len(jp2["items"]) == 2
-      and jp2["has_more"] is False
-      and not set(i["id"] for i in jp1["items"]) & set(i["id"] for i in jp2["items"]),
-      f"{rp1.status_code}/{rp2.status_code} {len(jp1.get('items', []))}/{len(jp2.get('items', []))}")
+# project list pagination (SPEC: default max 50, cursor paging).
+# Asserted against the unpaginated list rather than a hardcoded project count,
+# so adding a project anywhere earlier in this suite cannot break it.
+all_pids = [i["id"] for i in c.get("/api/v1/projects").json()["items"]]
+pages, cursor, guard = [], None, 0
+while guard < 50:
+    guard += 1
+    rp = c.get("/api/v1/projects", params={"limit": 2, **({"cursor": cursor} if cursor else {})})
+    jp = rp.json()
+    pages.append(jp)
+    if not jp["has_more"]:
+        break
+    cursor = jp["next_cursor"]
+paged = [i["id"] for pg in pages for i in pg["items"]]
+check("B04-p1: project list pages by 2, disjoint, terminates, covers the full list",
+      all(pg_i["items"] is not None for pg_i in pages)
+      and all(len(pg["items"]) <= 2 for pg in pages)
+      and pages[-1]["has_more"] is False and pages[-1]["next_cursor"] is None
+      and len(set(paged)) == len(paged) == len(all_pids)
+      and set(paged) == set(all_pids),
+      f"{len(all_pids)} projects in {len(pages)} pages; paged={len(paged)} unique={len(set(paged))}")
 
 # ---------------- concurrency -------------------------------------------------
 codes = []

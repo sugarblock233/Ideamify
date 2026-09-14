@@ -21,11 +21,15 @@ Budget contract (measured in Unicode chars of the compact JSON body):
   the FINAL response — including truncated / omitted_counts / continuations /
   warnings / data_notice — stays within max_chars whenever
   max_chars >= min_chars_needed + META_RESERVE. A fallback trim pass covers
-  the case where the reserved meta estimate is optimistic; it keeps the meta
-  complete and drops as little content as possible (most-priority kept).
+  the case where the reserved meta estimate is optimistic; it measures the
+  response with its meta already populated (dropping an item changes the meta,
+  which is itself part of the payload), keeps the meta complete and drops as
+  little content as possible (most-priority kept).
 - min_chars_needed is the observed size of the response shape with all group
   contents empty and meta unpopulated. A max_chars below it gets
-  422 CONTEXT_BUDGET_TOO_SMALL — never a silently missing ancestor.
+  422 CONTEXT_BUDGET_TOO_SMALL — never a silently missing ancestor. The same
+  error is raised if even the skeleton plus its final meta cannot fit, rather
+  than returning a 200 that exceeds max_chars.
 - Every field shortening ("…[截断]") and every whole-item omission sets
   truncated=true; omitted_counts reflects exactly what the response withheld
   ("not returned" != "never tried").
@@ -122,6 +126,9 @@ class _Ctx:
         self.warnings: list[str] = []
         self.dropped_fields: list[str] = []
         self._hinted: set[str] = set()
+        # group key -> continuation hint key, so the final trim pass can point
+        # at the same follow-up read the fill phase would have used.
+        self.hint_of: dict[str, str] = {}
 
     def fit(self, text: str, limit: int) -> str:
         text = (text or "").strip()
@@ -229,6 +236,7 @@ def build_context(pid: str, focus_node_id: Optional[str], q: Optional[str],
             return False
 
         def fill(key: str, items: list[dict], hint_key: Optional[str] = None) -> None:
+            ctx.hint_of[key] = hint_key or key
             taken = 0
             for it in items:
                 if admit(key, it):
@@ -380,43 +388,58 @@ def build_context(pid: str, focus_node_id: Optional[str], q: Optional[str],
             hint_key=hint_key)
 
     # ---------------- 收尾：元信息与预算兜底 ----------------
-    # 常规情况下填充阶段已按 fit_limit 留足 meta 空间。若实际 meta 超过
-    # META_RESERVE 的估计（极端形状），兜底裁剪：元信息保持完整，内容按
-    # 优先级从低到高丢弃；骨架（项目/焦点/祖先）永不丢弃。
-    if len(_uj(out)) > ctx.budget:
+    def finalize_meta() -> None:
+        """把 ctx 的截断状态写进响应。每次裁剪后都要重来一遍：省略计数、
+        续读指引与警告本身也占字符，它们才是最终返回给客户端的体积。"""
+        # 一致性：只要有任何整条省略，truncated 必为 true（计数与实际返回对应）。
+        ctx.truncated = ctx.truncated or bool(ctx.omitted)
+        out["truncated"] = ctx.truncated
+        out["omitted_counts"] = {k: v for k, v in ctx.omitted.items() if v}
+        out["continuations"] = sorted(ctx.continuations)
+        ws: list[str] = list(ctx.warnings)
+        if ctx.dropped_fields:
+            ws.append(f"焦点节点因预算限制未返回字段：{', '.join(ctx.dropped_fields)}"
+                      "（内容存在，只是本次未返回，可用 node 定点读取）")
+        if ctx.field_truncated:
+            ws.append("存在按字符截断的字段（以 …[截断] 标记）；不要把半句话当作完整结论。")
+        total_omitted = sum(ctx.omitted.values())
+        if total_omitted:
+            ws.append(
+                f"受预算限制共有 {total_omitted} 条未返回（见 omitted_counts）；"
+                "按 continuations 继续读取，而不是假设内容不存在。")
+        out["warnings"] = list(dict.fromkeys(ws))
+
+    def drop_lowest() -> bool:
+        """丢一条优先级最低的内容，并登记省略计数与续读指引。
+        骨架（项目/焦点 id+标题/祖先路径）与元信息永不丢弃。"""
         for key in _TRIM_ORDER:
-            while out.get(key) and len(_uj(out)) > ctx.budget:
+            if out.get(key):
                 out[key].pop()
                 ctx.omitted[key] = ctx.omitted.get(key, 0) + 1
+                ctx.continue_hint(ctx.hint_of.get(key, key))
                 ctx.truncated = True
-            if len(_uj(out)) <= ctx.budget:
-                break
-        if len(_uj(out)) > ctx.budget and focus is not None:
-            while len(_uj(out)) > ctx.budget:
-                fkey = next((k for k in reversed(FOCUS_FIELDS)
-                             if k in out["focus"]), None)
-                if fkey is None:
-                    break
+                return True
+        if focus is not None:
+            fkey = next((k for k in reversed(FOCUS_FIELDS) if k in out["focus"]), None)
+            if fkey is not None:
                 out["focus"].pop(fkey)
                 if fkey not in ctx.dropped_fields:
                     ctx.dropped_fields.append(fkey)
                 ctx.truncated = True
+                return True
+        return False
 
-    # 一致性：只要有任何整条省略，truncated 必为 true（计数与实际返回对应）。
-    ctx.truncated = ctx.truncated or bool(ctx.omitted)
-    out["truncated"] = ctx.truncated
-    out["omitted_counts"] = {k: v for k, v in ctx.omitted.items() if v}
-    out["continuations"] = sorted(ctx.continuations)
-    ws: list[str] = list(ctx.warnings)
-    if ctx.dropped_fields:
-        ws.append(f"焦点节点因预算限制未返回字段：{', '.join(ctx.dropped_fields)}"
-                  "（内容存在，只是本次未返回，可用 node 定点读取）")
-    if ctx.field_truncated:
-        ws.append("存在按字符截断的字段（以 …[截断] 标记）；不要把半句话当作完整结论。")
-    total_omitted = sum(ctx.omitted.values())
-    if total_omitted:
-        ws.append(
-            f"受预算限制共有 {total_omitted} 条未返回（见 omitted_counts）；"
-            "按 continuations 继续读取，而不是假设内容不存在。")
-    out["warnings"] = list(dict.fromkeys(ws))
+    # 常规情况下填充阶段已按 fit_limit 留足 meta 空间。若实际 meta 超过
+    # META_RESERVE 的估计（极端形状），在这里按优先级从低到高裁剪，直到
+    # **含完整元信息**的响应真正落进预算——而不是在 meta 填充前就判定合格。
+    finalize_meta()
+    while len(_uj(out)) > ctx.budget:
+        if not drop_lowest():
+            # 骨架 + 必需元信息都放不下：宁可 422，也不返回一个超预算的 200。
+            raise AppError(422, "CONTEXT_BUDGET_TOO_SMALL",
+                           "必需的项目/焦点/祖先信息与截断元信息已超出预算",
+                           min_chars_needed=len(_uj(out)),
+                           requested_chars=max_chars,
+                           hint="增大 max_chars，或去掉 focus_node_id 重新请求")
+        finalize_meta()
     return out
