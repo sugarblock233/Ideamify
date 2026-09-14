@@ -2,10 +2,116 @@ import { useMemo, useState } from "react";
 import TokenGate, { type ProjectLite } from "./gate/TokenGate";
 import Workspace from "./workspace/Workspace";
 import { parseDeepLink } from "./lib/deeplink";
-import { setToken } from "./lib/api";
+import api, { uuidv4, setToken } from "./lib/api";
+import { ApiError } from "./lib/types";
+
+/** A01: the empty state is a working screen, not a dead end — create the
+ *  first project directly in the browser (same commit path as the UI), enter
+ *  an existing project, or switch token. Input is preserved on errors. */
+function EmptyProjects({
+  projects,
+  onEnter,
+  onRefresh,
+}: {
+  projects: ProjectLite[];
+  onEnter: (id: string) => void;
+  onRefresh: (list: ProjectLite[]) => void;
+}) {
+  const [name, setName] = useState("");
+  const [objective, setObjective] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const valid = name.trim().length >= 1 && name.trim().length <= 100 && objective.trim().length >= 1;
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      onRefresh((await api.projects()).items);
+    } catch {
+      /* keep current list */
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const create = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.createProject({
+        request_id: uuidv4(),
+        name: name.trim(),
+        objective: objective.trim(),
+      });
+      const list = await api.projects();
+      onRefresh(list.items);
+      onEnter(res.id);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "创建项目失败（请检查网络/令牌）");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="gate">
+      <div className="box">
+        <h1>ResearchMap</h1>
+        <div className="sub">
+          {projects.length
+            ? "进入一个已有项目，或新建一个："
+            : "还没有可用的项目——先创建第一个项目吧。"}
+        </div>
+        {projects.map((pr) => (
+          <button
+            key={pr.id}
+            style={{ width: "100%", textAlign: "left", marginBottom: 6 }}
+            onClick={() => onEnter(pr.id)}
+          >
+            进入「{pr.name}」（v{pr.revision}）
+          </button>
+        ))}
+        <div style={{ borderTop: "1px solid var(--line)", margin: "12px 0" }} />
+        <label className="field">项目名（1–100）</label>
+        <input
+          value={name}
+          maxLength={100}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="如：富锂锰基正极的循环衰减机制"
+        />
+        <label className="field">研究目标（1–4000）</label>
+        <textarea
+          value={objective}
+          maxLength={4000}
+          onChange={(e) => setObjective(e.target.value)}
+          style={{ minHeight: 80 }}
+          placeholder="你要回答什么问题？"
+        />
+        {err && <div className="hint err" style={{ marginTop: 8 }}>{err}</div>}
+        <div className="mrow" style={{ marginTop: 12 }}>
+          <button className="primary" disabled={!valid || busy} onClick={() => void create()}>
+            {busy ? "创建中…" : "创建项目"}
+          </button>
+          <button onClick={() => void refresh()} disabled={refreshing}>
+            {refreshing ? "刷新中…" : "刷新项目列表"}
+          </button>
+        </div>
+        <div className="note">
+          项目数据保存在本服务器（SQLite 卷）。创建与编辑走同一条提交协议，
+          写操作都带令牌名身份（actor），不可伪造。
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const deep = useMemo(() => parseDeepLink(), []);
+  // The deep-link node id is only for the URL's own project; entering a
+  // project from the list never drags a foreign/stale node id along.
+  const [entryNode, setEntryNode] = useState<string | null>(deep.nodeId ?? null);
   // "token" here only records presence; the value itself lives in lib/api memory.
   const [authed, setAuthed] = useState(false);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
@@ -26,12 +132,14 @@ export default function App() {
 
   if (!projectId) {
     return (
-      <div className="gate">
-        <div className="box">
-          <h1>ResearchMap</h1>
-          <div className="sub">没有可用项目，请在使用前创建一个。</div>
-        </div>
-      </div>
+      <EmptyProjects
+        projects={projects}
+        onEnter={(id) => {
+          setEntryNode(null);
+          setProjectId(id);
+        }}
+        onRefresh={setProjects}
+      />
     );
   }
 
@@ -40,13 +148,17 @@ export default function App() {
       key={projectId}
       projectId={projectId}
       projects={projects}
-      initialNodeId={deep.nodeId}
-      onChangeProject={setProjectId}
+      initialNodeId={entryNode ?? undefined}
+      onChangeProject={(pid) => {
+        setEntryNode(null);
+        setProjectId(pid);
+      }}
       refreshProjectList={setProjects}
       onExit={() => {
         setToken(null);
         setAuthed(false);
         setProjectId(null);
+        setEntryNode(null);
       }}
     />
   );
