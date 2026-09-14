@@ -10,7 +10,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
-marked.setOptions({ gfm: false, breaks: true });
+marked.setOptions({ gfm: true, breaks: true });
 
 export function renderMarkdown(md: string): string {
   if (!md.trim()) return "";

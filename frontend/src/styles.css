@@ -431,6 +431,11 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .md-body code { background: #f2f4f7; border-radius: 4px; padding: 0 4px; font-size: 12px; }
 .md-body a { color: var(--sel); }
 .md-body h1, .md-body h2, .md-body h3 { margin: 10px 0 6px; }
+/* D1: GFM 表格——宽表在容器内横向滚动，不撑破侧栏 */
+.md-body table { display: block; overflow-x: auto; max-width: 100%; border-collapse: collapse; margin: 8px 0; }
+.md-body th, .md-body td { border: 1px solid #d4d9e0; padding: 4px 8px; text-align: left; }
+.md-body thead th { background: #f2f4f7; }
+.md-tbl-form { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
 
 .evid-row { display: grid; grid-template-columns: 86px 1fr 1fr 1fr 28px; gap: 6px; align-items: start; margin-bottom: 6px; }
 .evid-row .x { padding-top: 6px; border: none; background: none; color: var(--st-red); }

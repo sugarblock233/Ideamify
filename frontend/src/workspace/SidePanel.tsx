@@ -384,6 +384,8 @@ export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draf
   const t = useT();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewMd, setPreviewMd] = useState(false);
+  // D1: 「插入表格」的行列输入（简单 prompt 状态；确认后追加 Markdown 模板）
+  const [tbl, setTbl] = useState<{ rows: number; cols: number } | null>(null);
   return (
     <div className="editform">
       <div className="row" style={{ marginBottom: 8 }}>
@@ -460,6 +462,47 @@ export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draf
           <button onClick={() => setPreviewMd(!previewMd)} style={{ marginTop: 6 }}>
             {previewMd ? t("edit.preview.back") : t("edit.preview.go")}
           </button>
+          {!previewMd && (tbl ? (
+            // D1: 行列内联输入（简单确认，不用 window.prompt——e2e 可达）
+            <span className="md-tbl-form">
+              <input
+                type="number"
+                min={1}
+                max={12}
+                aria-label={t("edit.table.rows")}
+                value={tbl.rows}
+                onChange={(e) => setTbl({ ...tbl, rows: clampN(e.target.value, tbl.rows) })}
+                style={{ width: 56 }}
+              />
+              <input
+                type="number"
+                min={1}
+                max={12}
+                aria-label={t("edit.table.cols")}
+                value={tbl.cols}
+                onChange={(e) => setTbl({ ...tbl, cols: clampN(e.target.value, tbl.cols) })}
+                style={{ width: 56 }}
+              />
+              <button
+                data-testid="md-table-confirm"
+                onClick={() => {
+                  set({ details_md: appendTable(d.details_md, tbl.cols, tbl.rows) });
+                  setTbl(null);
+                }}
+              >
+                {t("common.confirm")}
+              </button>
+              <button onClick={() => setTbl(null)}>{t("common.cancel")}</button>
+            </span>
+          ) : (
+            <button
+              data-testid="md-table-insert"
+              onClick={() => setTbl({ rows: 3, cols: 3 })}
+              style={{ marginLeft: 6 }}
+            >
+              {t("edit.table.insert")}
+            </button>
+          ))}
         </>
       )}
 
@@ -1123,8 +1166,29 @@ function MoveLine({ entry, titleOf }: { entry: ChangeEntry; titleOf?: (id: strin
   );
 }
 
-function s(v: unknown): string {
-  return typeof v === "string" ? v : "";
+/* ---- D1: Markdown 表格模板 ---- */
+
+const clampN = (raw: string, fallback: number): number => {
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(12, Math.max(1, n));
+};
+
+/** 追加一个 GFM 表格模板到 details_md 末尾（列数 cols、数据行 rows，含表头）。 */
+export function appendTable(md: string, cols: number, rows: number): string {
+  const c = Math.min(12, Math.max(1, cols));
+  const r = Math.min(12, Math.max(1, rows));
+  const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
+  const out: string[] = [];
+  out.push("");
+  out.push(line(Array.from({ length: c }, (_, i) => `列${i + 1}`)));
+  out.push(line(Array.from({ length: c }, () => " --- ")));
+  for (let i = 0; i < r; i++) out.push(line(Array.from({ length: c }, () => "")));
+  const base = md && !md.endsWith("\n") ? md + "\n" : md ?? "";
+  return base + out.join("\n") + "\n";
+}
+
+function s(v: unknown): string {  return typeof v === "string" ? v : "";
 }
 
 function copyable(v: unknown): string {

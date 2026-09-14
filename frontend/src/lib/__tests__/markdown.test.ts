@@ -5,6 +5,26 @@
 
 import { describe, expect, it } from "vitest";
 import { markdownToPlainText, renderMarkdown } from "../markdown";
+import { appendTable } from "../../workspace/SidePanel";
+
+describe("appendTable (D1 编辑器表格模板)", () => {
+  it("appends a cols×(rows+1) GFM template with header row", () => {
+    const out = appendTable("正文", 3, 2);
+    expect(out.startsWith("正文\n")).toBe(true);
+    const lines = out.trimEnd().split("\n");
+    expect(lines[1]).toBe(""); // 与正文空一行
+    expect(lines[2]).toBe("| 列1 | 列2 | 列3 |");
+    expect(lines[3]).toContain("---");
+    expect(lines).toHaveLength(1 + 1 + 1 + 1 + 2); // 正文 + 空行 + 表头 + 分隔 + 2 数据行
+  });
+
+  it("clamps rows/cols into 1..12", () => {
+    const headerOf = (md: string) => md.trimEnd().split("\n").find((l) => l.startsWith("|"))!;
+    expect(headerOf(appendTable("", 0, 1))).toBe("| 列1 |"); // cols 下限 1
+    expect(headerOf(appendTable("", 99, 1)).split("|")).toHaveLength(14); // cols 上限 12 + 首尾
+    expect(appendTable("", 1, 99).trimEnd().split("\n")).toHaveLength(1 + 1 + 1 + 12); // 空行+表头+分隔+12 数据行
+  });
+});
 
 describe("renderMarkdown", () => {
   it("renders headings and emphasis as HTML", () => {
@@ -55,6 +75,21 @@ describe("renderMarkdown", () => {
   it("does not load external images even if <img> sneaks through text", () => {
     const html = renderMarkdown("pic: ![alt](https://cdn.example/pic.png)");
     expect(html).not.toContain("<img");
+  });
+
+  it("renders GFM tables (D1)", () => {
+    const html = renderMarkdown(
+      "| 指标 | 数值 |\n| --- | --- |\n| 覆盖率 | 60% |\n| 噪声 | +12% |",
+    );
+    expect(html).toContain("<table>");
+    expect(html).toContain("<thead>");
+    expect(html).toContain("<th");
+    expect(html).toContain("<td");
+    expect(html).toContain("覆盖率");
+    // 表格内的属性仍旧白名单化：不允许 style/事件属性注入
+    const evil = renderMarkdown("| x |\n| --- |\n| <b onmouseover=alert(1)>y</b> |");
+    expect(evil).not.toContain("onmouseover");
+    expect(evil).toContain("<b>y</b>");
   });
 });
 
