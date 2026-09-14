@@ -34,6 +34,7 @@ import SidePanel, {
   diffDraft,
 } from "./SidePanel";
 import ResizablePanel from "./ResizablePanel";
+import ViewToolbar from "./ViewToolbar";
 import TopBar, { type TopBarSearch } from "./TopBar";
 import type { ProjectLite } from "../gate/TokenGate";
 
@@ -405,6 +406,35 @@ export default function Workspace({
       return next;
     });
   }, []);
+
+  // A6: batch tools replace the whole fold set in one step. The pre-batch set
+  // is snapshotted for single-step 恢复上次; card-level manual folds (toggleFold
+  // above) never overwrite the snapshot (DECISIONS §14 note). Same persistence
+  // chokepoint as toggleFold: the folds/branchRoot saveView effect below.
+  const foldsRef = useRef(folds);
+  useEffect(() => {
+    foldsRef.current = folds;
+  }, [folds]);
+  const lastFoldsRef = useRef<string[] | null>(null);
+  const [canRestore, setCanRestore] = useState(false);
+  const replaceFolds = useCallback((next: ReadonlySet<string>) => {
+    lastFoldsRef.current = [...foldsRef.current];
+    setFoldsRaw(new Set(next));
+    setCanRestore(true);
+  }, []);
+  const restoreLastFolds = useCallback(() => {
+    const prev = lastFoldsRef.current;
+    if (!prev) return;
+    const cur = [...foldsRef.current];
+    // swap: the set just replaced becomes the new snapshot, so the button
+    // round-trips between the last two states.
+    lastFoldsRef.current = cur;
+    setFoldsRaw(new Set(prev));
+  }, []);
+  useEffect(() => {
+    lastFoldsRef.current = null;
+    setCanRestore(false);
+  }, [pid]);
 
   /* persist view state (folds / branch / viewport handled by Canvas) */
   useEffect(() => {
@@ -1016,6 +1046,15 @@ async function rebaseDraft() {
             onToast={ironToast}
           />
           {toast && <div className={`toast ${toast.kind === "err" ? "err" : "ok"}`}>{toast.msg}</div>}
+          <ViewToolbar
+            nodes={graph}
+            folds={folds}
+            branchRoot={branchRoot}
+            selectedId={selectedId}
+            onReplaceFolds={replaceFolds}
+            onRestoreLast={restoreLastFolds}
+            canRestore={canRestore}
+          />
         </div>
 
         <ResizablePanel

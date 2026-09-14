@@ -405,4 +405,15 @@ export const en: Record<keyof typeof zh, string> = {
   "a5.handle.label": "Resize side panel (← wider, → narrower)",
   "a5.locate.chip": "Locate current node",
   "a5.rail.dirty.title": "Panel is collapsed, but you have an unsaved draft",
+
+  "a6.expand.all": "Expand all · {n}",
+  "a6.expand.all.title": "Clear the fold set ({n} nodes visible; the branch filter is untouched)",
+  "a6.collapse.all": "Collapse all",
+  "a6.collapse.all.title": "Fold every visible node with children, leaving branch tops only",
+  "a6.more.title": "More expand/collapse tools",
+  "a6.expand.level": "Expand to level {n}",
+  "a6.expand.subtree": "Expand selected node's branch",
+  "a6.expand.subtree.title": "Clear all folds inside the selected node's subtree (folds outside stay)",
+  "a6.restore": "Restore last",
+  "a6.restore.title": "Return to the fold state before the last batch tool (card-level manual folds excluded)",
 };

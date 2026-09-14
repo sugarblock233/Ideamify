@@ -186,6 +186,18 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
   box-shadow: 0 1px 4px rgba(20,30,50,.18);
 }
 
+/* A6: batch expand/collapse toolbar overlay */
+.vtool {
+  position: absolute; top: 8px; right: 8px; z-index: 25;
+  display: flex; align-items: center; gap: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 3px 4px;
+}
+.vtool button { border: none; background: none; font-size: 12px; color: var(--ink-dim); padding: 3px 8px; border-radius: 6px; }
+.vtool button:hover { background: rgba(39, 75, 143, 0.08); color: var(--ink); }
+.vtool .pop { min-width: 160px; max-height: none; }
+.vtool .vt-menu.open { border-color: var(--sel); color: var(--sel); }
+
 /* ---------- side panel ---------- */
 /* A5: resizable/collapsible zone. The .side rules below stay as fallbacks; the
    ResizablePanel component drives width inline. */

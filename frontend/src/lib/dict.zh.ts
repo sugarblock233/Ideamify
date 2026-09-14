@@ -405,6 +405,18 @@ export const zh = {
   "a5.handle.label": "调整侧栏宽度（←加宽，→收窄，回车/拖动同样有效）",
   "a5.locate.chip": "定位当前节点",
   "a5.rail.dirty.title": "侧栏已收起，但有未保存的草稿",
+
+  // ---- ViewToolbar（A6，一键展开/折叠） ------------------------------------------------
+  "a6.expand.all": "全部展开 · {n}",
+  "a6.expand.all.title": "清空折叠集（当前可见 {n} 个节点；不改「只看这一分支」的过滤）",
+  "a6.collapse.all": "全部折叠",
+  "a6.collapse.all.title": "折叠全部有子节点的可见节点，只留各支顶层",
+  "a6.more.title": "更多展开/折叠工具",
+  "a6.expand.level": "展开到第 {n} 层",
+  "a6.expand.subtree": "展开选中节点的分支",
+  "a6.expand.subtree.title": "清除选中节点子树内的全部折叠（不含子树外的折叠）",
+  "a6.restore": "恢复上次",
+  "a6.restore.title": "回到上一批工具执行前的折叠状态（卡片上的手动折叠不参与）",
 } as const;
 
 export type DictKey = keyof typeof zh;
