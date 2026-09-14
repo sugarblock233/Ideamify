@@ -88,7 +88,7 @@ docker compose up -d --build
   （`/data/researchmap.db`）。重启、重建容器不应清空数据。
 - **刷新需重新认证。** 令牌只存于浏览器页面内存，刷新页面即退出登录——
   v0.1 有意如此。
-- **导出与备份。**
+- **导出与备份。** 对一个普通 SQLite 文件（开发检出，或已经拷出来的副本）：
 
   ```bash
   python3 tools/backup.py backup  --db <db文件> --out ./backup/ --json
@@ -98,6 +98,36 @@ docker compose up -d --build
 
   备份不含令牌配置，也不包含证据 path 所指向的外部文件；备份副本请另存到
   其他存储位置。
+
+- **备份正在运行的容器。** 库是 WAL 模式，**实时数据可能还在
+  `/data/researchmap.db-wal` 里**：只拷 `researchmap.db` 有可能拿到一个 4 KB、
+  一个表都没有的文件。请走 SQLite 在线备份（`tools/backup.py`，对 WAL 安全），
+  把仓库的 `tools/` 只读挂进一次性容器执行：
+
+  ```bash
+  export RESEARCHMAP_TOKENS='{"researcher":"…"}'   # compose 需要插值这个变量
+
+  # 1) 服务不用停：在线备份
+  docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
+    python /tools/backup.py backup --db /data/researchmap.db --out /data/backups
+  docker compose cp researchmap:/data/backups/researchmap-<ts>.db ./backup/
+  python3 tools/backup.py verify ./backup/researchmap-<ts>.db   # 打印计数；缺表即失败
+
+  # 2) 恢复：先停下写入方（v0.1 不做在线热替换）
+  docker compose stop
+  docker compose cp ./backup/researchmap-<ts>.db researchmap:/data/restore-source.db
+  docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
+    python /tools/backup.py restore --src /data/restore-source.db \
+      --dst /data/researchmap.db --server-stopped --yes
+  docker compose start
+  ```
+
+  备份产物是**单文件**（已转成 `journal_mode=DELETE`），在任何机器上直接
+  `verify`/`show` 都行。`restore` 会把被替换的库留档为
+  `/data/researchmap.db.pre-restore-<ts>`，并删除残留的 `-wal`/`-shm`——留着
+  它们会让 SQLite 在下次打开时把旧数据回放到恢复后的库上。重启后请重新加载
+  UI 核对版本号。对缺表的文件 `verify` 会**失败**（非零退出、打印 `缺表`）
+  而不是给它背书，所以 `docker cp` 这类误操作是当场报错而不是静默丢数据。
 
 ## 外部 AI 如何读写这份地图
 
@@ -189,9 +219,10 @@ python3 scripts/stress_test.py
   的版本说明。
 - **远端 CI 尚未经过运行**：`.github/workflows/ci.yml` 已配置并与本地工具链
   对齐，但截至本提交尚未在 GitHub 上执行过。
-- **容器路径未在本机复验**：本开发机没有 Docker；`Dockerfile` +
-  `compose.yaml` 已编写并评审，container CI job 正是为证明它而设——在首次
-  远端 CI 通过之前，请视镜像路径为**已配置、尚未本机验证**。
+- **容器路径已在本机验证，但尚未在 CI 里跑过**：镜像本机构建并运行通过
+  （仅回环发布、`/healthz`、令牌闸门、SPA 深链接回退、备份→恢复演练；见
+  `docs/implementation-results.md` §2 的 D01–D03），但 container CI job 尚未在
+  GitHub 上执行过，Windows 11 / podman 也未验证。
 - 本地文档含路径问题（见上文导航注记）。
 
 ## 路线图（已记录的暂缓项）

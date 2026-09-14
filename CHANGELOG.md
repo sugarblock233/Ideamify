@@ -112,6 +112,47 @@ items (B01–B06):
   otherwise unchanged (single trusted circle, token names are actor
   identities); read `SECURITY.md`.
 
+### 2026-09-14 — container verification, and what it found (D01–D03)
+
+With Docker finally available on the development host, the previously deferred
+container path was exercised end to end. It turned up two real defects, both
+fixed here. Details: `docs/implementation-results.md` §2.1 and §6.
+
+#### Fixed
+
+- The image never built. `COPY --from=frontend-build /src/frontend/dist` pointed
+  at a path that does not exist — `vite.config.ts` resolves `outDir: "dist"`
+  against the project root, which in that stage is `WORKDIR /src`, so the
+  bundle lands at `/src/dist`. The `docker compose build` a user would run on a
+  fresh clone failed outright. The Dockerfile is corrected and now asserts the
+  bundle exists at build time in both stages, so a future mistake fails the
+  build instead of the first request.
+- A backup could silently certify an empty database. The database is WAL mode,
+  so `docker cp researchmap.db` alone yields a 4 KB file with no tables (the
+  rows are in `researchmap.db-wal` — 218 KB in the drill) — and `tools/backup.py`
+  printed `verify 通过。` over it. `check_db` now exits non-zero when any of
+  `projects/nodes/relations/commits` is missing and names the `-wal`/`docker cp`
+  trap, and `backend/tests/test_backup.py` locks the behaviour in: a
+  schema-less source fails, a *live* WAL source still backs up completely, a
+  restore without `--server-stopped` is refused, and a restore clears stale
+  `-wal`/`-shm` instead of letting SQLite replay the old rows.
+
+#### Changed
+
+- Both READMEs document the container-safe backup and restore flow — run
+  `tools/backup.py` inside a one-off container with the repo's `tools/` mounted
+  read-only (the image deliberately excludes `tools/`), then `docker compose cp`
+  the single self-contained file out.
+
+#### Verified (not changed)
+
+- D01: compose expands to `host_ip: 127.0.0.1`; `docker port` confirms the
+  loopback-only publish. D02: no token and no `.db` anywhere in the image.
+  D03: backup → mutate → stop → restore → start, plus `restart` and
+  `up -d --build`, all keep revision/nodes/commits; an independent instance
+  built from the backup file alone reads the same revision, graph, history,
+  deep link, and renders in a real browser.
+
 ### 2026-09-14 — second acceptance round (R01–R10)
 
 The second audit rejected several first-round "fixed and verified" claims and

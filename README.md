@@ -101,7 +101,8 @@ in, with the content intact.
   container must not clear it.
 - **Re-authentication on refresh.** Tokens are held in page memory only;
   a browser refresh logs you out. That is intentional (v0.1).
-- **Export & backup.**
+- **Export & backup.** On a plain SQLite file (a dev checkout, or a copy you
+  already pulled out):
 
   ```bash
   python3 tools/backup.py backup  --db <db-file> --out ./backup/ --json
@@ -112,6 +113,39 @@ in, with the content intact.
   Backups contain no token configuration and do not include the external
   files that evidence paths reference. Keep a copy of a backup on separate
   storage.
+
+- **Backing up a running container.** The database is in WAL mode, so the live
+  rows may sit in `/data/researchmap.db-wal` rather than the main file:
+  copying `researchmap.db` alone can hand you a 4 KB file with **no tables at
+  all**. Use the SQLite online-backup path (`tools/backup.py`, WAL-safe) with
+  the repo's `tools/` mounted read-only into a one-off container:
+
+  ```bash
+  export RESEARCHMAP_TOKENS='{"researcher":"…"}'   # compose interpolates this
+
+  # 1) backup while the server keeps running
+  docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
+    python /tools/backup.py backup --db /data/researchmap.db --out /data/backups
+  docker compose cp researchmap:/data/backups/researchmap-<ts>.db ./backup/
+  python3 tools/backup.py verify ./backup/researchmap-<ts>.db   # 会打印计数，缺表即失败
+
+  # 2) restore: stop the writer first (v0.1 does not swap a live file)
+  docker compose stop
+  docker compose cp ./backup/researchmap-<ts>.db researchmap:/data/restore-source.db
+  docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
+    python /tools/backup.py restore --src /data/restore-source.db \
+      --dst /data/researchmap.db --server-stopped --yes
+  docker compose start
+  ```
+
+  The backup is a single self-contained file (converted to `journal_mode=DELETE`),
+  so `verify` and `show` work on it anywhere. `restore` keeps the replaced file
+  as `/data/researchmap.db.pre-restore-<ts>` and deletes stale `-wal`/`-shm`
+  sidecars — leaving them behind would let SQLite replay the old rows over the
+  restored data. After restarting, reload the UI and check the version number.
+  `verify` **fails** (non-zero, `缺表`) on a schema-less file instead of
+  certifying it, which is what makes the `docker cp` mistake loud rather than
+  silent.
 
 ## Let an external AI read and write the map
 
@@ -208,10 +242,11 @@ Docker and CI. The dev venv uses `requirements.txt`.
 - **Remote CI has not run yet.** The workflow in `.github/workflows/ci.yml`
   is configured and tool-consistent, but has not been executed on GitHub as
   of this commit (no remote here yet).
-- **Container path not re-verified locally.** This development host has no
-  Docker; `Dockerfile` + `compose.yaml` were written and reviewed, and the
-  container CI job exists exactly to prove them — until the first remote run
-  passes, treat the built-image path as **configured, not yet verified here**.
+- **Container path verified locally, not in CI yet.** The image builds and
+  runs on a Docker host here (loopback publish, `/healthz`, token gate, SPA
+  deep-link fallback, backup → restore drill; see
+  `docs/implementation-results.md` §2 D01–D03), but the container CI job has
+  not executed on GitHub yet, and Windows 11 / podman were not exercised.
 - Local-only docs carry paths (see note above).
 
 ## Roadmap (what has been documented as deferred)

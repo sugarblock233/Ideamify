@@ -4,7 +4,9 @@
 报告的条件是"逐项修复并用真实命令/截图重新验证"，并明确驳回了第一轮"已修复且验证"的结论：
 第一轮把"编译通过/文件就绪"当成"浏览器验证通过"，其中 3 个 P1 产品缺陷在真实环境可复现。
 因此本文件**不再沿用第一轮的自评**：每一条 R 项都给出本轮真实执行过的复现命令与实测结果；
-未跑过的（尤其容器与远端 CI）一律写"未验证/待远端权限"，不写"本地等价物全绿"。
+未跑过的一律写"未验证/待远端权限"，不写"本地等价物全绿"。
+（所有者在本机装好 Docker 后，本节关于容器的部分已从"未验证"改为**本机实测**，见 §2.1；
+仍未跑过的只剩**远端 CI**——包括 CI 里的 container job。）
 
 状态只使用五种：**已修复且验证／已实现未验证／待所有者决定／待远端权限／未完成**。
 
@@ -19,12 +21,13 @@
 |---|---|
 | 系统 | macOS Darwin 25.6.0（本地）；CI 基线 ubuntu-latest / Node 22 / Python 3.13 |
 | 本地 Node | v24.10.0（**与 CI 基线 22 不同**，未消差；见 §6-1） |
+| Docker | Docker 29.4.0 + Compose v5.1.2（**本轮由所有者新装**，此前本机无 Docker）；镜像 `researchmap:0.1`，compose 项目 `betterairesearch` |
 | Python | 3.13.5（`backend/.venv`） |
 | 浏览器 | Playwright Chromium（headless，本机缓存） |
 | E2E 服务器 | 生产形同源：`uvicorn app.main:app` + 预构建 `dist/`，127.0.0.1:8021，库为每次新建的 `mktemp -d` scratch |
 | 压测读数服务器 | 127.0.0.1:8126（对 `/tmp/rm-stress/data.db`，1104 节点 / 3000 关系） |
-| 数据库 | 全部为临时合成库：`E2E_DB_DIR=$(mktemp -d)`、`/tmp/rm-stress`、`/tmp/rm-smoke*`。交付前清理 |
-| 真实数据 | **未触碰**。所有写入都指向临时库；令牌全为合成值（`e2e-*`/`e2e-other-*`/`researcher-*`/`stress-*`） |
+| 数据库 | 全部为临时/合成库：`E2E_DB_DIR=$(mktemp -d)`、`/tmp/rm-stress`、`/tmp/rm-smoke*`、容器演练卷 `rm-d03-restore`（全新创建，演练后删除）。交付前清理 |
+| 真实数据 | **未触碰**。所有写入都指向临时库与合成卷；令牌全为合成值（`e2e-*`/`e2e-other-*`/`researcher-*`/`stress-*`/`container-token-*`） |
 | 提交署名 | 本轮 12 个提交**不带** `Co-Authored-By` 尾注（遵守本仓 `AGENTS.md:94`）；存量 15 个提交的尾注冲突见 §3-9 |
 
 ---
@@ -46,14 +49,78 @@
 
 ---
 
+## 2.1 容器项 D01–D03（所有者新装 Docker 后本轮实测）
+
+第一轮/第二轮报告都把容器标为"未验证"。所有者此后在本机装了 Docker（29.4.0 +
+Compose v5.1.2），所以这一节全部是**本机真实容器**上跑出来的，命令可原样复现。
+数据自始至终是合成演练数据（令牌 `container-token-0001`、项目"容器演练项目"），
+**没有触碰任何真实库**；演练用的卷 `rm-d03-restore` 与临时文件已在 §8 清理。
+
+| 项 | 状态 | 复现命令 / 场景 | 实际结果 | 剩余限制 |
+|---|---|---|---|---|
+| **D01** Compose 默认仅绑定回环 | 已修复且验证 | `RESEARCHMAP_TOKENS='{…}' RESEARCHMAP_PORT=8022 docker compose config`；`docker port betterairesearch-researchmap-1` | 展开配置为 `host_ip: 127.0.0.1`、`published: "8022"`、`target: 8000`；`docker port` 实测 `8000/tcp -> 127.0.0.1:8022`（独立实例同为 `127.0.0.1:8023`）。**容器内** uvicorn 仍监听 `0.0.0.0:8000`（容器边界内），与宿主发布地址是两件事 | 远程访问仍由部署者自行加受保护网络/HTTPS 代理，项目不代改 SSH/防火墙/隧道 |
+| **D02** 构建上下文干净、锁文件生效 | 已修复且验证 | `docker history --no-trunc researchmap:0.1 \| grep -ci 'token-'`；`docker run --rm researchmap:0.1 sh -lc 'env \| grep -i researchmap; find / -name "*.db" …'` | 镜像历史里**零**令牌字样；镜像内 `RESEARCHMAP_*` 只有路径变量（`RESEARCHMAP_DB`/`RESEARCHMAP_STATIC`），**没有任何令牌**；镜像内搜不到 `.db` 文件。`.dockerignore` 排除 `.git`/`node_modules`/`backend/.venv`/`*.db`/`*.db-wal`/`*.db-shm`/`backup(s)/`；镜像按 `requirements.lock.txt` 装、前端用 `npm ci` | 运行用户仍是 root（未改非 root，故不涉及既有卷权限变更）；Node 基线 22 与本地 24 的差异仍在 §6-1 |
+| **D03** 生产持久化路径 | 已修复且验证 | 见下方"演练序列" | 构建→启动→鉴权→建项目→深链接→**备份→恢复→重建**全链路通过；`restart` 与 `up -d --build` 后 revision/nodes/commits 均不变（1/3/1）；备份产物单文件 98 KB、`verify` 通过、主机侧 `show` 可读；恢复后 revision 从 2 回到 1、演练新增节点消失；**独立实例**（全新卷 + 仅用备份文件，8023）读出 revision=1 / nodes=3 / commits=1 与同一条 summary，深链接 200、无令牌 401 | v0.1 不做在线热替换，恢复必须 `docker compose stop`；Windows 11 / podman 未验证 |
+
+### D03 演练序列（全部为真实执行过的命令）
+
+```bash
+export RESEARCHMAP_TOKENS='{"container":"container-token-0001"}' RESEARCHMAP_PORT=8022
+
+# ① 天真做法 → 本轮新发现的静默丢数据陷阱（详见 §6 计划外缺陷 A）
+docker compose cp researchmap:/data/researchmap.db /tmp/rm-d03/naive.db   # 4096 字节
+python3 tools/backup.py verify /tmp/rm-d03/naive.db                      # 缺表 → exit 1
+
+# ② 正确备份（服务不停；Online Backup API 对 WAL 安全）
+docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
+  python /tools/backup.py backup --db /data/researchmap.db --out /data/backups
+docker compose cp researchmap:/data/backups/researchmap-<ts>.db ./backup/
+python3 tools/backup.py verify ./backup/researchmap-<ts>.db   # counts = 1/3/0/1
+
+# ③ 制造"恢复后应当消失"的改动（revision 1 → 2，新增一个节点）
+#    POST /api/v1/projects/<pid>/commits（合成）
+
+# ④ 恢复
+docker compose stop
+docker compose cp ./backup/researchmap-<ts>.db researchmap:/data/restore-source.db
+docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
+  python /tools/backup.py restore --src /data/restore-source.db \
+    --dst /data/researchmap.db --server-stopped --yes
+docker compose start
+# → 旧库留档 researchmap.db.pre-restore-<ts>；清理 -wal/-shm；revision 回到 1、3 节点
+
+# ⑤ 重启与重建后数据仍在
+docker compose restart && docker compose up -d --build   # 两次后仍是 revision=1 / 3 节点
+
+# ⑥ 独立实例核对（全新卷，只用备份文件）
+docker volume create rm-d03-restore
+docker run --rm -v "$BK":/src-backup.db:ro -v rm-d03-restore:/data researchmap:0.1 \
+  sh -lc 'cp /src-backup.db /data/researchmap.db'
+docker run -d --name rm-d03-restored -p 127.0.0.1:8023:8000 \
+  -e RESEARCHMAP_TOKENS='{"container":"container-token-0001"}' \
+  -v rm-d03-restore:/data researchmap:0.1
+
+# ⑦ 真实浏览器（不是 curl 了事）：闸门 → 画布 → 深链接选中
+RESEARCHMAP_BASE_URL=http://127.0.0.1:8023 RESEARCHMAP_TOKEN=container-token-0001 \
+RESEARCHMAP_SHOT=/tmp/rm-d03/container-restored-instance.png \
+  node scripts/verify_container.mjs <pid>
+# → revision=1 / nodes=3 / cardsOnCanvas=2 / detailVisible=true / consoleErrors=[]
+```
+
+截图 `docs/evidence/d03-container-restored-1440x900.png` 就是 ⑦ 的画面：顶栏显示
+**项目 v1**，画布上是"容器演练项目"虚拟根 + 两条一级/二级节点，右下 MiniMap 有内容，
+右侧详情面板选中深链接指向的节点。**这是恢复后（revision 回到 1）的容器**。
+
+---
+
 ## 3. 对第一轮文档错误结论的更正
 
 以下每条都是报告指出、本轮逐条核实的**事实性错误**，已在 §2/本文件中纠正（不新增文件、不虚构内容）：
 
 1. **E2E 通过数**：第一轮写 "e2e 12/12"。第二轮报告在真实浏览器环境复现为 **10 passed / 2 failed**。本轮修完定位器与操作方式后为 **19/19（5 个文件）**，连续三次全新库全绿。
-2. **后端用例数**：第一轮写 "api_smoke 88/88"。本轮补充 B04/R05 相关检查后为 **93/93**（`pytest` 入口 6 passed，包裹该脚本）。
+2. **后端用例数**：第一轮写 "api_smoke 88/88"。本轮补充 B04/R05 相关检查后为 **93/93**（`pytest` 入口当时 6 passed，包裹该脚本）。所有者装好 Docker 后又补了 6 个备份/恢复契约用例，现为 **12 passed**。
 3. **前端单测数**：第一轮写 37/37。本轮为 **48 passed（6 文件）**（新增冲突保留、markdown、关系等）。
-4. **G05 容器 job**：第一轮写"五 job 的本地等价全部绿"。事实：本机**没有 Docker**（无 CLI、无 docker.sock），**container job 从未在本地或以任何形式跑过** → 现标 **待远端权限**，不得以其它 job 的绿替代。
+4. **G05 容器 job**：第一轮写"五 job 的本地等价全部绿"。写第二轮报告时的事实是：本机**没有 Docker**（无 CLI、无 docker.sock），**container job 从未在本地或以任何形式跑过** → 当时标 **待远端权限**，不得以其它 job 的绿替代。**该条现已更新**：所有者本轮在本机安装 Docker（29.4.0 + Compose v5.1.2），容器路径已**本机实测通过**（§2.1 D01–D03）；仍未验证的只剩"CI 的 container job 在 GitHub 上跑过"这一件事，它依旧是 **待远端权限**。
 5. **G03 Issue 模板数量**：第一轮写"三模板"。仓库实际为 `bug_report.yml` + `feature_request.yml`（外加 `config.yml` 选择器），**没有第三个模板**；本文件不再声称存在，也不为凑数新增。
 6. **G09 文件职责**：第一轮写有 `WORKSPACE.md` 与 `PROTOCOL.md`。**这两个文件在仓库中不存在**（`ci.yml` 的文件列表与仓库实际文件都没有）。已删除该声称，不新造文件。
 7. **A03 的口径**：第一轮把 1100+ 规模首开 zoom 0.4（卡宽 ≈112px、文字 ≈5px）记为"设计取舍"。报告要求改为"**折叠通过、可读性未通过**"。本轮按 R03 修复后重测 **0.7 / 196px / 9.8px**，故 A03 现为**已修复且验证**（§2 R03）。
@@ -73,10 +140,12 @@
 | 类型检查 | `cd frontend && npx tsc --noEmit` | **0 错误** |
 | 前端单测 | `npm run test`（vitest） | **48 passed / 6 files** |
 | 前端构建 | `npm run build` | 成功（仅 chunk 体积告警） |
-| 后端 | `backend/.venv/bin/python -m pytest backend/tests -q` | **6 passed**（包裹 `api_smoke` 93/93 + 5 个 CLI 契约用例） |
+| 后端 | `backend/.venv/bin/python -m pytest backend/tests -q` | **12 passed**（包裹 `api_smoke` 93/93 + 5 个 CLI 契约用例 + 6 个备份/恢复契约用例 `test_backup.py`） |
 | API 冒烟明细 | `RESEARCHMAP_DB=… RESEARCHMAP_TOKENS='{"researcher":"…","ai-sim":"…"}' backend/.venv/bin/python backend/tests/api_smoke.py` | **93/93 passed** |
 | E2E（浏览器，生产形） | `cd frontend && E2E_DB_DIR=$(mktemp -d) npx playwright test` | **19 passed**，连跑三次：18.0s / 17.3s / 17.9s |
 | 压测读数 | `scripts/measure_firstopen.mjs`（见 §7） | 1104 节点：zoom 0.7 / 卡宽 196px / 标题 9.8px / 8 卡完整入屏 |
+| 容器全链路（本机 Docker） | §2.1 的演练序列（build → 鉴权 → 深链接 → 备份 → 恢复 → 重启/重建 → 独立实例） | 全通过；备份 1/3/0/1、恢复后 revision 2→1、独立实例读数一致 |
+| 容器真实浏览器 | `scripts/verify_container.mjs`（对 8022/8023 两个实例） | 修订后容器：`cardsOnCanvas=2`、`detailVisible=true`、`consoleErrors=[]` |
 | CI（远端） | — | **未运行**（无 push 授权）→ 待远端权限 |
 | CI 配置静态核对 | `uses:` SHA 格式、YAML 结构、credential-scan 假凭证试跑 | 通过（本地） |
 
@@ -96,7 +165,7 @@ E2E 19 条清单见 §7。`acceptance.spec.ts` 的"空库"用例在库非空时�
 | 1 | LICENSE 与版权 | **已决定并落实** | `LICENSE` = MIT，版权人 `sugarblock233`；README/README.zh-CN 徽章与文字同步 |
 | 2 | 安全通报渠道 | **已决定并落实** | `SECURITY.md` 指向 **GitHub Issues / Discussions**（仓库内唯一的联系渠道，未编造邮箱或 SLA） |
 | 3 | 项目名 | **已决定并落实** | 最终名 **Ideamify**（应用名 ResearchMap），README/package.json/页面标题一致 |
-| 4 | Docker / Windows 11 验证 | **所有者明确推迟** | 本轮不做，不阻塞；D01/D02 保持"已实现未验证"，D03 保持"未完成" |
+| 4 | Docker / Windows 11 验证 | **Docker 部分已在本机完成；Windows 11 仍推迟** | 所有者本轮装了 Docker（29.4.0 + Compose v5.1.2），D01/D02/D03 已**本机实测通过**（§2.1），不再是"未验证"；Windows 11 与 podman 明确不做，不阻塞 |
 | 5 | push / tag / 发布 / 可见性 | **待所有者操作** | 本轮**未 push、未打 tag、未发布、未改可见性**；`origin/main` 仍停在 `1c5677e`（v0.1，无 `.github/`，故远端从未跑过 CI）；首次发布文案在 `CHANGELOG.md` Unreleased |
 | 6 | 远端仓库设置（topics/description/ruleset/安全特性） | **待所有者操作** | 本地无法读取或修改，未验证 |
 | 7 | 存量 15 个提交的 `Co-Authored-By` 尾注 | **待所有者决定** | 改写历史是共享风险操作，本交付只记录不动手 |
@@ -105,8 +174,8 @@ E2E 19 条清单见 §7。`acceptance.spec.ts` 的"空库"用例在库非空时�
 
 ## 6. 未验证项与补验步骤（诚实清单）
 
-1. **CI 远端全绿（含 container job）** — 待远端权限。补验：Owner 授权 push → 观察 5 个 job（frontend / backend / container / checks）→ 全绿后本行改判。
-2. **D01/D02/D03 容器行为** — 本机无 Docker。补验：CI container job 跑通（build + `/healthz` + 默认无令牌 401）+ 一次备份/恢复演练。
+1. **CI 远端全绿（含 container job）** — 待远端权限。补验：Owner 授权 push → 观察 5 个 job（frontend / backend / container / checks）→ 全绿后本行改判。**注意**：container job 要证明的是"CI 机器上能构建并跑通"，与"本机容器已验证"是两件事，不能互相替代。
+2. ~~D01/D02/D03 容器行为~~ → **已在本机 Docker 上验证通过**（§2.1）。剩余补验：CI container job 跑通；以及 Windows 11 / podman（所有者已明确推迟）。
 3. **本地 Node 24.10.0 与 CI 基线 22 的差异** — 未消差。补验：CI 首次绿即视为消差。
 4. **A07 深链接的 1 次偶发失败** — 未定位（报错文本未留存），此后 43 次连跑未复现。补验：CI 连续 20 次全绿后撤销"残余风险"标记。
 5. **B04 其它浏览器分支**（上移/同级排序/环防护/历史翻页）— 本轮只补验了报告点名的"归档→恢复"往返（并因此发现并修复了真实缺陷，见下），其余分支仍只有后端语义覆盖。补验：4 个浏览器用例。
@@ -117,6 +186,8 @@ E2E 19 条清单见 §7。`acceptance.spec.ts` 的"空库"用例在库非空时�
 
 - **B04 归档后无法在浏览器恢复**（报告只要求"补验"）：后端 `graph` 默认过滤归档节点、搜索同样过滤，而前端**没有任何恢复入口**（`SidePanel` 的 `onRestore` 只连了 props 未渲染）——归档即不可逆。修复：`graph?include_archived=true`、顶栏 ⋯「显示/隐藏已归档节点」开关（跨提交同步保持）、画布归档卡样式 + 「已归档」标记、详情面板「恢复此节点」+ 必填原因。提交 `f9a7b5a`，e2e `bab84f5`。**反向验证**：仅回退 `SidePanel.tsx` 时用例停在等待「恢复此节点」按钮，证明缺失入口就是缺陷本身。
 - **R02 的 syncAll 变体**（见 §2 R02）：未处理的冲突会被后续任意一次成功提交静默清掉。修复 `e13738c`，含单元测试 5 条与一条真实路径 e2e。
+- **Dockerfile 的前端产物路径写错**（本轮容器验证发现；报告未涉及）：`COPY --from=frontend-build /src/frontend/dist ./frontend-dist` 指向不存在的路径——`vite.config.ts` 的 `outDir: "dist"` 是相对项目根解析的，而构建阶段 `WORKDIR /src`，所以产物落在 `/src/dist`（`COPY frontend/ ./` 拷贝的是 frontend/ 的**内容**）。镜像此前**从未构建成功过**；第一次真跑 `docker compose build` 就报 `/src/frontend/dist: not found`。修复 Dockerfile 并加构建期断言（`test -f /src/dist/index.html`、运行阶段 `test -f /app/frontend-dist/index.html`），让构建失败而不是首个请求失败。
+- **备份链路的静默丢数据陷阱**（本轮容器验证发现；报告未涉及）：库是 WAL 模式，`docker cp researchmap.db` 只能拿到 4 KB、**一个表都没有**的主文件（真实数据在 `researchmap.db-wal`，实测 218392 字节 / 3 节点），而旧版 `tools/backup.py verify` 对这种文件照打 `"缺表"` + `verify 通过。`——**给一份空库背书，比直接失败更危险**。修复：`check_db` 对缺任一 `SCHEMA_TABLES` 直接非零退出，并在错误里点名 `-wal` 侧写文件与 `docker cp` 陷阱；新增 `backend/tests/test_backup.py` 6 条契约用例（缺表必须失败、缺表源不得产出备份、**真实 WAL 源仍要拷出完整数据**、恢复必须有 `--server-stopped`、恢复要留档旧库并清掉残留 `-wal`）。**反向验证**：把守卫摘掉重跑 → 3 条安全用例失败；恢复后 6/6 通过。README 双语补上可复制的容器备份/恢复流程（`docker compose run --rm -v "$PWD/tools:/tools:ro"`，因为 `tools/` 被 `.dockerignore` 排除在镜像外）。
 
 ---
 
@@ -132,6 +203,7 @@ E2E 19 条清单见 §7。`acceptance.spec.ts` 的"空库"用例在库非空时�
 | `docs/evidence/a03-stress-1104-firstopen-1280x800.png` | 同上，1280×800 |
 | `docs/evidence/a03-firstopen-1440x900.png`、`a03-firstopen-1280x800.png` | 大图 e2e 用例再生（小图断言卡宽阈值） |
 | `docs/evidence/a03-branch-expanded-1440x900.png` | 分支视图：只看这一分支 → 展开此分支 |
+| `docs/evidence/d03-container-restored-1440x900.png` | **D03 关键证据**：容器部署经备份→恢复→重建后的真实浏览器画面（顶栏 `项目 v1` = 恢复后的 revision 1，深链接选中的详情面板可读） |
 
 ### 复现命令
 
@@ -139,7 +211,7 @@ E2E 19 条清单见 §7。`acceptance.spec.ts` 的"空库"用例在库非空时�
 # 前端：类型检查 + 单测 + 构建（48 用例）
 cd frontend && npm ci && npm run build && npm run test && npx tsc --noEmit
 
-# 后端：pytest 包裹 api_smoke（93/93）+ CLI 契约用例（共 6 用例）
+# 后端：pytest 包裹 api_smoke（93/93）+ CLI 契约用例 + 备份/恢复契约用例（共 12 用例）
 backend/.venv/bin/python -m pytest backend/tests -q
 
 # E2E 全量（19 用例 / 5 文件；务必用全新 scratch 库）
@@ -159,6 +231,15 @@ cd frontend && RESEARCHMAP_BASE_URL=http://127.0.0.1:8126 RESEARCHMAP_TOKEN=stre
 # R08：README 里的备份/校验命令真跑
 python3 tools/backup.py backup --db <scratch.db> --out /tmp/rm-bk
 python3 tools/backup.py verify /tmp/rm-bk/researchmap-<ts>.db
+
+# D01–D03：容器全链路（合成令牌与合成数据；完整序列见 §2.1）
+cp .env.example .env   # 或 export RESEARCHMAP_TOKENS='{"container":"container-token-0001"}'
+RESEARCHMAP_PORT=8022 docker compose up -d --build
+docker port betterairesearch-researchmap-1                     # → 127.0.0.1:8022
+docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
+  python /tools/backup.py backup --db /data/researchmap.db --out /data/backups
+RESEARCHMAP_BASE_URL=http://127.0.0.1:8022 RESEARCHMAP_TOKEN=container-token-0001 \
+RESEARCHMAP_SHOT=/tmp/rm-d03/container.png node scripts/verify_container.mjs <pid>
 ```
 
 ### E2E 用例清单（19）
@@ -181,7 +262,7 @@ smoke.spec.ts       深链接+令牌闸门；错误令牌被拒；选中出详�
 - **§10 延后项未实现**（自动发版、CLA、机器人、i18n、demo 站、CITATION/DOI、多平台镜像）。
 - **真实数据库未触碰**：全部验证走临时库与临时端口；仓库内无 `*.db` 被跟踪。
 - **用户原件未入库**：`docs/acceptance-2026-09-1{3,4}/` 保持 untracked。
-- **临时资源已清理**：scratch 服务器终止，`/tmp/rm-*` 删除。
-- **状态小结**：R01–R09 **已修复且验证**；R10 **部分已修复且验证**（CI 文件与署名），其"远端跑一次"部分 **待远端权限**；D01/D02 **已实现未验证**、D03 **未完成**（所有者已明确推迟）。
+- **临时资源已清理**：scratch 服务器终止，`/tmp/rm-*` 删除。容器演练起的两个容器（`betterairesearch-researchmap-1`、独立实例 `rm-d03-restored`）已 `docker compose down` / `docker rm -f` 删除，演练专用卷 `rm-d03-restore` 已删；**镜像 `researchmap:0.1` 与 compose 数据卷 `betterairesearch_researchmap-data` 保留**（后者只含本次合成演练数据，属项目声明的卷）——**没有删除任何真实或既有测试卷**。
+- **状态小结**：R01–R09 **已修复且验证**；R10 **部分已修复且验证**（CI 文件与署名），其"远端跑一次"部分 **待远端权限**；**D01/D02/D03 已修复且验证**（本机容器实测，§2.1）；Windows 11 / podman 与 CI container job 仍 **待远端权限/所有者决定**。
 
-**结论：本地实施完成；发布仍待这些事项** —— ① 所有者授权 push 并由远端 CI 跑绿（含容器 job）；② 所有者决定存量 15 个提交尾注是否改写；③ 远端仓库设置（topics/description/ruleset/安全特性）与首次 tag/发布；④ 容器与 Windows 11 验证（所有者已推迟）。
+**结论：本地实施完成；发布仍待这些事项** —— ① 所有者授权 push 并由远端 CI 跑绿（含容器 job；"本机容器已验证"不能替代它）；② 所有者决定存量 15 个提交尾注是否改写；③ 远端仓库设置（topics/description/ruleset/安全特性）与首次 tag/发布；④ Windows 11 / podman 验证（所有者已推迟）。
