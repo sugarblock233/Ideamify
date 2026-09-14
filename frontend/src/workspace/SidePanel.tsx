@@ -1,8 +1,9 @@
 /** Right panel: node detail + edit (save/cancel), relations list with
  *  pagination, node history with before/after (SPEC 3.2 / 3.3 / 3.5). */
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type {
+  ChangeEntry,
   CommitDetail,
   CommitItem,
   EvidenceItem,
@@ -15,7 +16,7 @@ import type {
 } from "../lib/types";
 import { NODE_KINDS, NODE_STATUSES, RELATION_KINDS } from "../lib/types";
 import { KIND_LABEL, RELATION_LABEL, STATUS_LABEL, fmtTime } from "../lib/format";
-import { MAX_CANVAS_RELATION } from "../lib/relations";
+import { MAX_CANVAS_RELATION, relationLabel } from "../lib/relations";
 import { renderMarkdown } from "../lib/markdown";
 
 /* ------------------------------- draft ---------------------------------- */
@@ -70,6 +71,10 @@ export interface SidePanelProps {
   draft: Draft | null;
   setDraft: (d: Draft | null) => void;
   dirty: boolean;
+  /** A02: draft baseline is older than the loaded project revision. */
+  draftStale: boolean;
+  /** A02: the project revision this draft was read at. */
+  draftBaseRev: number | null;
   draftErr: string | null;
   onDiscardDraft: () => void;
   onSave: () => void;
@@ -109,6 +114,10 @@ export interface SidePanelProps {
   history: {
     commits: CommitItem[];
     detail: CommitDetail | null;
+    hasMore?: boolean;
+    onLoadMore?: () => void;
+    /** B04: resolve historical parent ids to titles (graph may have moved on). */
+    titleOf?: (id: string) => string | null;
     onSelect: (c: CommitItem) => void;
   };
 }
@@ -163,8 +172,15 @@ function ProjectInfo({ project }: { project: Project | null }) {
 /* ------------------------------- detail ---------------------------------- */
 
 function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
+  const [editing, setEditing] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewMd, setPreviewMd] = useState(false);
+  // B01: switching nodes always returns to the read view.
+  useEffect(() => {
+    setEditing(false);
+    setDetailsOpen(false);
+    setPreviewMd(false);
+  }, [n.id]);
   const d = p.draft ?? draftOf(n);
   const set = (patch: Partial<Draft>) => p.setDraft({ ...d, ...patch });
 
@@ -204,13 +220,36 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         更新于 {fmtTime(n.updated_at)} · 作者 {n.updated_by}
       </div>
 
+      {p.cameFrom && (
+        <div className="hint" style={{ marginBottom: 6 }}>
+          你从关联目标定位过来。
+          <button style={{ marginLeft: 8 }} onClick={p.onBackToFrom}>
+            返回来源节点
+          </button>
+        </div>
+      )}
       {p.dirty && (
         <div className="hint">有未保存的修改。切换节点或关闭面板会提醒；服务器版本变化不会覆盖草稿。</div>
       )}
+      {p.draftStale && (
+        <div className="hint err">
+          本地草稿基于 v{p.draftBaseRev}，服务器已推进到 v{p.project?.revision}（期间有他人的提交）。
+          <div style={{ margin: "6px 0", display: "flex", gap: 6 }}>
+            <button onClick={p.onRebaseDraft} disabled={p.conflictRevision != null}>
+              载入新版并重排草稿
+            </button>
+          </div>
+          重排前不能保存，避免静默覆盖他人修改。
+        </div>
+      )}
       {p.conflictRevision != null && (
         <div className="hint err">
-          提交时发生版本冲突：服务器已更新到 v{p.conflictRevision}，你的草稿仍完整保留。可先“
-          载入新版并重排草稿”再保存，或放弃草稿。不会静默以你的旧版本覆盖他人修改。
+          提交时发生版本冲突：服务器已更新到 v{p.conflictRevision}，你的草稿仍完整保留。
+          <div style={{ margin: "6px 0", display: "flex", gap: 6 }}>
+            <button onClick={p.onRebaseDraft}>载入新版并重排草稿</button>
+            <button onClick={p.onDiscardDraft}>放弃草稿</button>
+          </div>
+          不会静默以你的旧版本覆盖他人修改。
         </div>
       )}
       {p.draftErr && <div className="hint err">{p.draftErr}</div>}
@@ -221,7 +260,13 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         </div>
       )}
 
-      <label className="field">类型 / 状态</label>
+      {editing ? (
+        <div className="editform">
+          <div className="row" style={{ marginBottom: 8 }}>
+            <span className="muted">编辑模式 —— 只提交你改动的字段</span>
+          </div>
+
+          <label className="field">类型 / 状态</label>
       <div style={{ display: "flex", gap: 8 }}>
         <select value={d.kind} onChange={(e) => set({ kind: e.target.value as NodeKind })}>
           {NODE_KINDS.map((k) => (
@@ -296,7 +341,8 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
 
       <label className="field">证据引用（{d.evidence.length}/20）——只登记定位，系统不抓取、不执行、不代理读取</label>
       {d.evidence.map((ev, i) => (
-        <div className="evid-row" key={i}>
+        <Fragment key={i}>
+          <div className="evid-row">
           <select
             value={ev.kind}
             onChange={(e) => {
@@ -338,6 +384,18 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
             ✕
           </button>
         </div>
+        <input
+          className="evid-note"
+          placeholder="note：限定语 / 可信度说明（如：样本少，不普适）"
+          maxLength={500}
+          value={ev.note}
+          onChange={(e) => {
+            const evs = [...d.evidence];
+            evs[i] = { ...ev, note: e.target.value };
+            set({ evidence: evs });
+          }}
+        />
+        </Fragment>
       ))}
       {d.evidence.length < 20 && (
         <button
@@ -348,14 +406,35 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
           + 添加证据
         </button>
       )}
+        </div>
+      ) : (
+        <ReadView n={n} />
+      )}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <button className="primary" onClick={p.onSave} disabled={!p.dirty || !d.title.trim()}>
-          保存
-        </button>
-        <button onClick={p.onDiscardDraft} disabled={!p.dirty}>
-          取消（恢复原值）
-        </button>
+      <div className="savebar">
+        {editing ? (
+          <>
+            <button
+              className="primary"
+              onClick={p.onSave}
+              disabled={!p.dirty || !d.title.trim() || p.draftStale}
+              title={p.draftStale ? "草稿基于旧版本：先点「载入新版并重排草稿」" : undefined}
+            >
+              保存
+            </button>
+            <button onClick={p.onDiscardDraft} disabled={!p.dirty}>
+              取消（恢复原值）
+            </button>
+            <button onClick={() => setEditing(false)}>收起编辑</button>
+          </>
+        ) : (
+          <>
+            {p.dirty && <span className="chip">有未保存的修改</span>}
+            <button className="primary" onClick={() => setEditing(true)}>
+              编辑
+            </button>
+          </>
+        )}
       </div>
 
       {p.organization && <OrganizationTab org={p.organization} node={n} />}
@@ -364,6 +443,103 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
           本节点已归档。恢复后相关 relations 才会重新渲染。
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------- read view (B01) ---------------------------- */
+
+function ReadView({ n }: { n: NodeFull }) {
+  const [detailsOpen, setDetailsOpen] = useState(n.details_md.trim().length > 0);
+  const sections: [string, string][] = [
+    ["摘要 summary", n.summary],
+    ["为什么做 · 试法 rationale", n.rationale],
+    ["直接观察 finding", n.finding],
+    ["当前解释与决定 decision", n.decision],
+    ["适用条件 scope", n.scope],
+  ].filter(([, v]) => v && v.trim().length > 0) as [string, string][];
+  return (
+    <div className="readview">
+      {sections.map(([label, v]) => (
+        <div key={label} className="readsec">
+          <div className="readsec-label">{label}</div>
+          <div className="readsec-body">{v}</div>
+        </div>
+      ))}
+      {n.tags.length > 0 && (
+        <div className="readsec">
+          <div className="readsec-label">标签 tags</div>
+          <div className="readsec-body">{n.tags.join("、")}</div>
+        </div>
+      )}
+      {n.evidence.length > 0 && (
+        <div className="readsec">
+          <div className="readsec-label">证据引用 evidence（{n.evidence.length}/20）</div>
+          {n.evidence.map((ev, i) => (
+            <EvidenceReadCard key={i} ev={ev} />
+          ))}
+        </div>
+      )}
+      {n.details_md.trim() && (
+        <div className="readsec">
+          <div className="readsec-label">
+            长说明 details_md（Markdown）
+            <button
+              style={{ marginLeft: 8, padding: "0 6px" }}
+              onClick={() => setDetailsOpen(!detailsOpen)}
+            >
+              {detailsOpen ? "收起" : "展开"}
+            </button>
+          </div>
+          {detailsOpen && (
+            <div
+              className="md-body"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(n.details_md) }}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceReadCard({ ev }: { ev: EvidenceItem }) {
+  const [copied, setCopied] = useState(false);
+  // B02: url only becomes an anchor for http(s); everything else is plain text.
+  const isSafeUrl = ev.kind === "url" && /^https?:\/\//i.test(ev.value.trim());
+  const copy = () =>
+    navigator.clipboard
+      .writeText(ev.value)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
+  return (
+    <div className="evid-card">
+      <div className="evhead">
+        <span className="evkind">
+          {ev.kind === "inline" ? "行内记录" : ev.kind === "url" ? "url 链接" : "path 路径"}
+        </span>
+        {ev.label && <b>{ev.label}</b>}
+      </div>
+      {ev.value && (
+        <div className="evvalue">
+          {isSafeUrl ? (
+            <a href={ev.value} target="_blank" rel="noopener noreferrer">
+              {ev.value}
+            </a>
+          ) : (
+            <span className="evtext">{ev.value}</span>
+          )}
+          {!isSafeUrl && (
+            <button className="evcopy" onClick={copy} title="复制内容">
+              {copied ? "已复制 ✓" : "复制"}
+            </button>
+          )}
+        </div>
+      )}
+      {ev.note && <div className="evnote muted">note：{ev.note}</div>}
     </div>
   );
 }
@@ -503,7 +679,7 @@ function RelationItemView({ r, p }: { r: RelationItem; p: SidePanelProps }) {
         onClick={() => p.onPickRelation(p.selectedRelationId === r.id ? null : r.id)}
         title="点我：在画布上单独显示这条关系线"
       >
-        <span style={{ opacity: 0.65 }}>{arrow}</span> {RELATION_LABEL[r.kind]}：{r.other.title}
+        <span style={{ opacity: 0.65 }}>{arrow}</span> {relationLabel(r, p.node?.title ?? "")}
         {r.archived && <span className="arch">（已归档）</span>}
       </div>
       <div className="rpath">{otherPath}{r.other.archived ? "（节点已归档）" : ""}</div>
@@ -601,6 +777,14 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
           </div>
         </div>
       ))}
+      {/* B04: paged history — every page is loadable, nothing is silently dropped */}
+      {history.hasMore && (
+        <div className="pager">
+          <button onClick={() => history.onLoadMore?.()}>
+            加载更多（每页 20 条，最早 v{history.commits[history.commits.length - 1]?.revision} 之前）
+          </button>
+        </div>
+      )}
 
       {d && (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
@@ -613,7 +797,10 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
           {entry ? (
             <>
               {entry.type === "node.create" && (
-                <div className="hint ok">本提交创建了该节点。原始快照：</div>
+                <>
+                  <div className="hint ok">本提交创建了该节点。原始快照：</div>
+                  <CreateSnapshot entry={entry} />
+                </>
               )}
               {entry.type === "node.update" && (
                 <div>
@@ -630,12 +817,7 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
                   )}
                 </div>
               )}
-              {entry.type === "node.move" && (
-                <div className="hint ok">
-                  位置变更：parent {str(entry["before_parent"]) ?? "（一级）"} → parent{" "}
-                  {str(entry["after_parent"]) ?? "（一级）"}
-                </div>
-              )}
+              {entry.type === "node.move" && <MoveLine entry={entry} titleOf={history.titleOf} />}
               {(entry.type === "node.archive" || entry.type === "node.restore") && (
                 <div className="hint">{entry.type === "node.archive" ? "本提交归档了该节点。" : "本提交恢复了该节点。"}</div>
               )}
@@ -655,16 +837,69 @@ function HistoryTab({ n, history }: { n: NodeFull; history: SidePanelProps["hist
   );
 }
 
+function CreateSnapshot({ entry }: { entry: ChangeEntry }) {
+  // B04: node.create entries must show the created snapshot (the `after`
+  // object), not just "the node was created".
+  const after = (entry.after ?? {}) as Record<string, unknown>;
+  const all: [string, string][] = [
+    ["标题", s(after.title)],
+    ["类型", after.kind ? KIND_LABEL[after.kind as NodeKind] ?? s(after.kind) : ""],
+    ["状态", after.status ? STATUS_LABEL[after.status as NodeStatus] ?? s(after.status) : ""],
+    ["摘要", s(after.summary)],
+    ["适用条件", s(after.scope)],
+    ["观察", s(after.finding)],
+  ];
+  const rows = all.filter(([, v]) => v);
+  if (rows.length === 0) return <div className="muted">（快照字段缺失）</div>;
+  return (
+    <div className="snap">
+      {rows.map(([k, v]) => (
+        <div className="diff-row" key={k}>
+          <span className="k">{k}</span>
+          <span className="v a">{copyable(v)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MoveLine({ entry, titleOf }: { entry: ChangeEntry; titleOf?: (id: string) => string | null }) {
+  // B04: the backend stores node.move as before/after OBJECTS
+  // ({parent_id, order_index}); legacy string fields are tolerated too.
+  const before = (entry.before ?? {}) as Record<string, unknown>;
+  const after = (entry.after ?? {}) as Record<string, unknown>;
+  const parentOf = (o: Record<string, unknown>, legacyKey: string): string | null => {
+    if (typeof o.parent_id === "string" && o.parent_id) return o.parent_id;
+    const legacy = entry[legacyKey];
+    return typeof legacy === "string" && legacy ? legacy : null;
+  };
+  const bPid = parentOf(before, "before_parent");
+  const aPid = parentOf(after, "after_parent");
+  const idx = (o: Record<string, unknown>): number | null =>
+    typeof o.order_index === "number" ? (o.order_index as number) : null;
+  const label = (id: string | null): string =>
+    id == null ? "（一级）" : titleOf?.(id) ?? `${id.slice(0, 8)}…`;
+  const bi = idx(before);
+  const ai = idx(after);
+  return (
+    <div className="hint ok">
+      位置变更：父级 {label(bPid)} ⇒ {label(aPid)}
+      {bi != null || ai != null ? ` · 同级序号 ${bi ?? "—"} ⇒ ${ai ?? "—"}` : ""}
+    </div>
+  );
+}
+
+function s(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
 function copyable(v: unknown): string {
   if (v == null) return "∅";
-  if (typeof v === "string") return v.length > 200 ? v.slice(0, 200) + "…" : v || "∅";
+  if (typeof v === "string") return v || "∅";
   try {
-    const s = JSON.stringify(v);
-    return s.length > 200 ? s.slice(0, 200) + "…" : s;
+    // B04: no truncation — long field values stay fully readable/copyable
+    return JSON.stringify(v, null, 2);
   } catch {
     return String(v);
   }
-}
-function str(v: unknown): string | null {
-  return typeof v === "string" ? v : null;
 }
