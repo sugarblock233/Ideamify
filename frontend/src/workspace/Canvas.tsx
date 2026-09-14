@@ -38,30 +38,11 @@ const edgeTypes = { relation: RelationEdge };
  *  in this app rather than being re-derived per entry point. */
 export const READABLE_ZOOM = 0.7;
 
-const VIEW_KEY = (pid: string) => `rm.view.${pid}`;
-interface SavedView {
-  folds: string[];
-  branchRoot: string | null;
-  viewport: { x: number; y: number; zoom: number } | null;
-}
+// Saved-view storage now lives in lib/viewPrefs.ts ( SavedView v2, per-layout
+// slots). Re-exported here so the existing Canvas readers keep one import site.
+import { loadSavedView, saveView } from "../lib/viewPrefs";
 
-export function loadSavedView(pid: string): SavedView {
-  try {
-    const raw = localStorage.getItem(VIEW_KEY(pid));
-    if (raw) return JSON.parse(raw) as SavedView;
-  } catch {
-    /* private mode / cleared */
-  }
-  return { folds: [], branchRoot: null, viewport: null };
-}
-
-export function saveView(pid: string, v: SavedView): void {
-  try {
-    localStorage.setItem(VIEW_KEY(pid), JSON.stringify(v));
-  } catch {
-    /* ignore */
-  }
-}
+export { loadSavedView, saveView } from "../lib/viewPrefs";
 
 export interface CanvasProps {
   projectId: string;
