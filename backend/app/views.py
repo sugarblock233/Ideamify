@@ -179,21 +179,28 @@ def get_project(pid: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.get("/projects/{pid}/graph")
-def get_graph(pid: str) -> dict:
+def get_graph(pid: str, include_archived: bool = False) -> dict:
     with read_session() as s:
         p = _get_project_row(s, pid)
-        nodes = list(s.scalars(select(Node).where(Node.project_id == pid,
-                                                 Node.archived.is_(False))).all())
-        by_id = {n.id: n for n in nodes}
+        # B04: archived nodes are hidden by default; `include_archived=true` is how
+        # the UI reaches them again to restore one (a node archived in the browser
+        # is otherwise unreachable, since search and the graph both hide it).
+        all_nodes = list(s.scalars(select(Node).where(Node.project_id == pid)).all())
+        nodes = all_nodes if include_archived else [n for n in all_nodes if not n.archived]
+        by_id = {n.id: n for n in all_nodes}
         rels = list(s.scalars(select(Relation).where(Relation.project_id == pid,
                                                      Relation.archived.is_(False))).all())
         child_count: dict[str, int] = {}
-        for n in nodes:
-            if n.parent_id and n.parent_id in by_id:
+        # Leaf-only archiving is judged on NON-archived children, exactly as the
+        # node endpoint does — so showing archived nodes never makes an
+        # effectively-leaf node look unarchivable.
+        for n in all_nodes:
+            if n.parent_id and n.parent_id in by_id and not n.archived:
                 child_count[n.parent_id] = child_count.get(n.parent_id, 0) + 1
+        visible_ids = {n.id for n in nodes}
         rel_count: dict[str, int] = {}
         for r in rels:
-            if r.source_id in by_id and r.target_id in by_id:
+            if r.source_id in visible_ids and r.target_id in visible_ids:
                 rel_count[r.source_id] = rel_count.get(r.source_id, 0) + 1
                 rel_count[r.target_id] = rel_count.get(r.target_id, 0) + 1
         nodes = sorted(nodes, key=lambda n: (0 if n.parent_id is None else 1,
@@ -209,6 +216,7 @@ def get_graph(pid: str) -> dict:
                 "tags": _lj(n.tags), "evidence_count": len(_lj(n.evidence) or []),
                 "child_count": child_count.get(n.id, 0),
                 "relation_count": rel_count.get(n.id, 0),
+                "archived": bool(n.archived),
                 "created_at": n.created_at, "updated_at": n.updated_at,
                 "created_by": n.created_by,
             } for n in nodes],

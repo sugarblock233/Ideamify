@@ -57,7 +57,14 @@ const api = {
       "/api/v1/projects",
     ),
   project: (pid: string) => request<{ id: string; name: string; objective: string; revision: number } & Record<string, unknown>>(`/api/v1/projects/${pid}`),
-  graph: (pid: string) => request<import("./types").GraphResponse>(`/api/v1/projects/${pid}/graph`),
+  graph: (pid: string, opts: { includeArchived?: boolean } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.includeArchived) p.set("include_archived", "true");
+    const qs = p.toString();
+    return request<import("./types").GraphResponse>(
+      `/api/v1/projects/${pid}/graph${qs ? `?${qs}` : ""}`,
+    );
+  },
   node: (pid: string, nid: string) => request<import("./types").NodeFull>(`/api/v1/projects/${pid}/nodes/${nid}`),
   nodeRelations: (pid: string, nid: string, opts: { cursor?: string; includeArchived?: boolean; limit?: number } = {}) => {
     const p = new URLSearchParams();

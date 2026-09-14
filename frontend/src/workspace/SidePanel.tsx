@@ -646,6 +646,8 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
   useEffect(() => setParent(org.currentParent), [org.currentParent]);
   const [showArchive, setShowArchive] = useState(false);
   const [archiveReason, setArchiveReasonLocal] = useState("");
+  const [showRestoreNode, setShowRestoreNode] = useState(false);
+  const [restoreNodeReason, setRestoreNodeReason] = useState("");
   const isLeaf = node.child_count === 0;
 
   return (
@@ -700,6 +702,39 @@ function OrganizationTab({ org, node }: { org: NonNullable<SidePanelProps["organ
             </div>
           )}
           {!isLeaf && <div className="muted" style={{ marginTop: 4 }}>当前有子节点：请先移动或处理子节点，系统禁止级联删除。</div>}
+        </div>
+      )}
+      {/* B04: the inverse of archive. Node archiving is only reversible from the
+          UI at all because the canvas can show archived nodes — otherwise an
+          archived node has no reachable entry point (R09/B04 note). */}
+      {node.archived && (
+        <div style={{ marginTop: 8 }}>
+          {!showRestoreNode ? (
+            <button className="primary" onClick={() => setShowRestoreNode(true)}>
+              恢复此节点
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                placeholder="恢复原因（必填）"
+                value={restoreNodeReason}
+                onChange={(e) => setRestoreNodeReason(e.target.value)}
+                style={{ maxWidth: 260 }}
+              />
+              <button
+                className="primary"
+                disabled={!restoreNodeReason.trim()}
+                onClick={() => {
+                  org.onRestore(restoreNodeReason.trim());
+                  setShowRestoreNode(false);
+                  setRestoreNodeReason("");
+                }}
+              >
+                确认恢复
+              </button>
+              <button onClick={() => setShowRestoreNode(false)}>取消</button>
+            </div>
+          )}
         </div>
       )}
     </div>

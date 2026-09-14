@@ -194,6 +194,14 @@ check("graph hides archived; counts adjust", child not in byid and byid[top]["ch
       f"top.child_count={byid[top]['child_count']} third.rel={byid[third]['relation_count']}")
 check("node endpoint still returns archived node (AI can see history)",
       c.get(f"/api/v1/projects/{pid}/nodes/{child}").json()["archived"] is True)
+# B04：浏览器要靠 include_archived 才能在画布上找回已归档节点并恢复它
+ga = c.get(f"/api/v1/projects/{pid}/graph?include_archived=true").json()["nodes"]
+bya = {n["id"]: n for n in ga}
+check("graph?include_archived=true returns the archived node flagged archived",
+      bya.get(child, {}).get("archived") is True and byid.get(child) is None, str(sorted(bya)))
+check("include_archived does not change child_count (leaf rule still counts live children)",
+      bya[top]["child_count"] == byid[top]["child_count"] == 3,
+      f"with={bya[top]['child_count']} without={byid[top]['child_count']}")
 r = commit([{"op": "node.archive", "id": top, "reason": "尝试归档带子节点"}], 6)
 check("archive node with children -> 422 ARCHIVE_HAS_CHILDREN",
       r.status_code == 422 and r.json()["error"]["code"] == "ARCHIVE_HAS_CHILDREN", r.text)

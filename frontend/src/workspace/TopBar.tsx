@@ -36,6 +36,10 @@ export interface TopBarProps {
   onManualRefresh: () => void;
   onExport: () => void;
   onShowAiAccess: () => void;
+  /** B04: archived nodes are hidden unless this is on; it is how the UI reaches
+   *  an archived node again in order to restore it. */
+  showArchived: boolean;
+  onToggleArchived: () => void;
   onExit: () => void;
   search: TopBarSearch;
   recent: {
@@ -142,6 +146,12 @@ export default function TopBar(p: TopBarProps) {
             )}
             <div className="pop-item" onClick={() => { setMenuOpen(false); p.onFit(); }}>
               适应当前图
+            </div>
+            <div
+              className={`pop-item dotmenu-line${p.showArchived ? " on" : ""}`}
+              onClick={() => p.onToggleArchived()}
+            >
+              {p.showArchived ? "隐藏已归档节点 ✓" : "显示已归档节点"}
             </div>
             <div className={`pop-item dotmenu-line${p.recent.open ? " on" : ""}`} onClick={() => p.recent.toggle()}>
               近期变化 ▾

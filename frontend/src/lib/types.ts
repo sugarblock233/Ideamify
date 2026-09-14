@@ -64,6 +64,8 @@ export interface GraphNode {
   evidence_count: number;
   child_count: number;
   relation_count: number;
+  /** only ever true when the graph was fetched with include_archived (B04) */
+  archived?: boolean;
   created_at: string;
   updated_at: string;
   created_by: string;

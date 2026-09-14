@@ -112,6 +112,11 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .rm-card.selected { border-color: var(--sel); box-shadow: 0 0 0 3px rgba(39, 75, 143, 0.25), 0 1px 3px rgba(20,30,50,.12); }
 .rm-card.flash { animation: rm-flash 1.6s ease 2; }
 @keyframes rm-flash { 0%,100% { background: #fff; } 50% { background: #fff3c4; } }
+/* B04: archived cards only appear when "显示已归档节点" is on — dashed edge and
+   a muted body so they never read as live research state. */
+.rm-card.archived { border-style: dashed; background: repeating-linear-gradient(135deg, #fafbfc, #fafbfc 8px, #f2f4f7 8px, #f2f4f7 16px); }
+.rm-card.archived .title, .rm-card.archived .summary { color: var(--ink-dim); }
+.arch-pill { font-size: 10px; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
 
 .rm-card .row1 { display: flex; align-items: center; gap: 6px; min-height: 18px; }
 .kind-badge {

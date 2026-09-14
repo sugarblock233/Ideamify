@@ -27,7 +27,7 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
 
   return (
     <div
-      className={`rm-card ${selected ? "selected" : ""}`}
+      className={`rm-card ${selected ? "selected" : ""}${n.archived ? " archived" : ""}`}
       style={
         {
           borderLeftColor: STATUS_COLOR[n.status],
@@ -52,6 +52,7 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
           <span className="dot" style={{ background: STATUS_COLOR[n.status] }} />
           {STATUS_LABEL[n.status]}
         </span>
+        {n.archived && <span className="arch-pill">已归档</span>}
       </div>
       <div className="title" title={n.title}>{n.title}</div>
       <div className="summary" title={n.summary}>{n.summary || "（无摘要）"}</div>

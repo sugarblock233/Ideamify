@@ -55,6 +55,17 @@ export default function Workspace({
   const [project, setProject] = useState<Project | null>(null);
   const [graph, setGraph] = useState<GraphNode[]>([]);
   const [graphLoaded, setGraphLoaded] = useState(false);
+  /** B04: archived nodes are hidden by default. Without this toggle a node
+   *  archived in the browser would be unreachable (the graph and search both
+   *  filter it out), so there would be no way back — see restoreNodeAction. */
+  const [showArchived, setShowArchived] = useState(false);
+  // Every graph read after the first one (commit sync, manual refresh, toggle)
+  // has to agree with the first one about archived nodes, or the toggle would
+  // silently snap back on the next commit.
+  const showArchivedRef = useRef(showArchived);
+  useEffect(() => {
+    showArchivedRef.current = showArchived;
+  }, [showArchived]);
   const [actor, setActor] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [loadingAll, setLoadingAll] = useState(true);
@@ -117,6 +128,12 @@ export default function Workspace({
 
   const selectedRef = useRef<string | null>(null);
   const incArchRef = useRef(false);
+  /** One graph read for the whole file, so "show archived" can never diverge
+   *  between the first load, commit syncs and manual refreshes (B04). */
+  const fetchGraph = useCallback(
+    () => api.graph(pid, { includeArchived: showArchivedRef.current }),
+    [pid],
+  );
   /** Always-fresh project snapshot so commit/polling closures never see a
    *  stale expected_revision (T19/T21). */
   const projRef = useRef<Project | null>(null);
@@ -220,7 +237,7 @@ export default function Workspace({
   }, []);
 
   const syncAll = useCallback(async () => {
-    const g = await api.graph(pid);
+    const g = await fetchGraph();
     setGraph(g.nodes);
     setGraphLoaded(true);
     setProject((p) => (p ? { ...p, revision: g.project_revision } : p));
@@ -380,7 +397,7 @@ export default function Workspace({
         const [sess, proj, g] = await Promise.all([
           api.session(),
           api.project(pid),
-          api.graph(pid),
+          fetchGraph(),
         ]);
         if (!alive) return;
         setActor(sess.actor);
@@ -441,6 +458,29 @@ export default function Workspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid]);
 
+  /* B04: toggling "show archived" only needs the graph re-read — the session
+     and project header are unchanged, and a full reload would drop the view. */
+  const archivedToggleLoaded = useRef(false);
+  useEffect(() => {
+    if (!archivedToggleLoaded.current) {
+      archivedToggleLoaded.current = true; // the first load above already ran
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const g = await fetchGraph();
+        if (alive) setGraph(g.nodes);
+      } catch (e) {
+        if (alive) ironToast(e instanceof ApiError ? e.message : "加载失败", "err");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArchived]);
+
   /* ------------------------- polling for new revisions -------------------- */
 
   useEffect(() => {
@@ -467,7 +507,7 @@ export default function Workspace({
   async function loadUpdates() {
     const prev = graph;
     try {
-      const g = await api.graph(pid);
+      const g = await fetchGraph();
       const prevMap = new Map(prev.map((n) => [n.id, n]));
       const newIds = new Set<string>();
       const changedIds = new Set<string>();
@@ -914,6 +954,8 @@ async function rebaseDraft() {
         }}
         onExport={() => void exportProject()}
         onShowAiAccess={() => setAiAccessOpen(true)}
+        showArchived={showArchived}
+        onToggleArchived={() => setShowArchived((v) => !v)}
         onExit={() => {
           if (!confirmLeaveDraft("退出当前项目，")) return;
           onExit();
