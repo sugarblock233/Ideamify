@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import api, { setToken } from "../lib/api";
+import { useT } from "../lib/i18n";
 
 export interface ProjectLite {
   id: string;
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export default function TokenGate({ deepProjectId, onEnter }: Props) {
+  const t = useT();
   const [token, setTokenInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -31,7 +33,9 @@ export default function TokenGate({ deepProjectId, onEnter }: Props) {
       onEnter(list.items, deepProjectId ?? list.items[0]?.id ?? null);
     } catch (e) {
       setToken(null);
-      setErr(e instanceof Error ? e.message : "无法连接服务器");
+      // Server-provided error messages pass through untranslated (DECISIONS §16);
+      // only the synthetic fallback is keyed.
+      setErr(e instanceof Error ? e.message : t("gate.err.network"));
     } finally {
       setBusy(false);
     }
@@ -41,25 +45,22 @@ export default function TokenGate({ deepProjectId, onEnter }: Props) {
     <div className="gate">
       <div className="box">
         <h1>ResearchMap</h1>
-        <div className="sub">轻量科研演化地图 · 输入访问令牌打开工作站</div>
+        <div className="sub">{t("gate.subtitle")}</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
             type="password"
             autoFocus
-            placeholder="访问令牌（Bearer token）"
+            placeholder={t("gate.token.placeholder")}
             value={token}
             onChange={(e) => setTokenInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && enter()}
           />
           <button className="primary" onClick={enter} disabled={busy}>
-            {busy ? "打开…" : "打开"}
+            {busy ? t("gate.opening") : t("gate.open")}
           </button>
         </div>
         {err && <div className="hint err" style={{ marginTop: 10 }}>{err}</div>}
-        <div className="note">
-          令牌只保存在页面内存中，刷新后需要重新输入；不会写入 Cookie、localStorage 或 URL。
-          本应用不需要任何模型 API Key。
-        </div>
+        <div className="note">{t("gate.note")}</div>
       </div>
     </div>
   );

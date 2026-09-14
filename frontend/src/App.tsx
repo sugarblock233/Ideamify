@@ -4,6 +4,7 @@ import Workspace from "./workspace/Workspace";
 import { parseDeepLink } from "./lib/deeplink";
 import api, { uuidv4, setToken } from "./lib/api";
 import { ApiError } from "./lib/types";
+import { useT } from "./lib/i18n";
 
 /** A01: the empty state is a working screen, not a dead end — create the
  *  first project directly in the browser (same commit path as the UI), enter
@@ -17,6 +18,7 @@ function EmptyProjects({
   onEnter: (id: string) => void;
   onRefresh: (list: ProjectLite[]) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState("");
   const [objective, setObjective] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -49,7 +51,7 @@ function EmptyProjects({
       onRefresh(list.items);
       onEnter(res.id);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "创建项目失败（请检查网络/令牌）");
+      setErr(e instanceof ApiError ? e.message : t("empty.create.err"));
     } finally {
       setBusy(false);
     }
@@ -60,9 +62,7 @@ function EmptyProjects({
       <div className="box">
         <h1>ResearchMap</h1>
         <div className="sub">
-          {projects.length
-            ? "进入一个已有项目，或新建一个："
-            : "还没有可用的项目——先创建第一个项目吧。"}
+          {projects.length ? t("empty.enter.or.create") : t("empty.none")}
         </div>
         {projects.map((pr) => (
           <button
@@ -70,38 +70,35 @@ function EmptyProjects({
             style={{ width: "100%", textAlign: "left", marginBottom: 6 }}
             onClick={() => onEnter(pr.id)}
           >
-            进入「{pr.name}」（v{pr.revision}）
+            {t("empty.enter.btn", { name: pr.name, rev: pr.revision })}
           </button>
         ))}
         <div style={{ borderTop: "1px solid var(--line)", margin: "12px 0" }} />
-        <label className="field">项目名（1–100）</label>
+        <label className="field">{t("empty.name.label")}</label>
         <input
           value={name}
           maxLength={100}
           onChange={(e) => setName(e.target.value)}
-          placeholder="如：富锂锰基正极的循环衰减机制"
+          placeholder={t("empty.name.placeholder")}
         />
-        <label className="field">研究目标（1–4000）</label>
+        <label className="field">{t("empty.objective.label")}</label>
         <textarea
           value={objective}
           maxLength={4000}
           onChange={(e) => setObjective(e.target.value)}
           style={{ minHeight: 80 }}
-          placeholder="你要回答什么问题？"
+          placeholder={t("empty.objective.placeholder")}
         />
         {err && <div className="hint err" style={{ marginTop: 8 }}>{err}</div>}
         <div className="mrow" style={{ marginTop: 12 }}>
           <button className="primary" disabled={!valid || busy} onClick={() => void create()}>
-            {busy ? "创建中…" : "创建项目"}
+            {busy ? t("empty.creating") : t("empty.create")}
           </button>
           <button onClick={() => void refresh()} disabled={refreshing}>
-            {refreshing ? "刷新中…" : "刷新项目列表"}
+            {refreshing ? t("empty.refreshing") : t("empty.refresh")}
           </button>
         </div>
-        <div className="note">
-          项目数据保存在本服务器（SQLite 卷）。创建与编辑走同一条提交协议，
-          写操作都带令牌名身份（actor），不可伪造。
-        </div>
+        <div className="note">{t("empty.note")}</div>
       </div>
     </div>
   );

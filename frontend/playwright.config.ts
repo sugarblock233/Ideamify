@@ -18,6 +18,9 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     headless: true,
     trace: "retain-on-failure",
+    // Every E2E spec selects controls by their Chinese accessible names; pin
+    // the browser locale so the i18n browser-language probe resolves "zh".
+    locale: "zh-CN",
   },
   webServer: {
     command: `mkdir -p ${quote(E2E_DB_DIR)} && ${quote(E2E_PYTHON)} -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port ${PORT}`,
