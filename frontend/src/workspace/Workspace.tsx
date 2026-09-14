@@ -44,6 +44,7 @@ import SidePanel, {
 } from "./SidePanel";
 import ResizablePanel from "./ResizablePanel";
 import ViewToolbar from "./ViewToolbar";
+import OutlineView from "./OutlineView";
 import TopBar, { type TopBarSearch } from "./TopBar";
 import type { ProjectLite } from "../gate/TokenGate";
 
@@ -1088,7 +1089,23 @@ async function rebaseDraft() {
       <div className="workspace">
         <div className="canvas-wrap">
           {loadingAll && <div className="empty" style={{ padding: 30 }}>{t("ws.loading.project")}</div>}
-          <Canvas
+          {layout === "outline" ? (
+            /* B3: 大纲 replaces the whole canvas (same folds/branch state, so
+               the two presentations always agree; switching back remounts the
+               canvas, which re-applies its own layout slot's saved viewport). */
+            <OutlineView
+              nodes={graph}
+              folds={folds}
+              branchRoot={branchRoot}
+              selectedId={selectedId}
+              onSelect={(id) => void selectNode(id)}
+              onToggleFold={toggleFold}
+              pendingLocate={pendingLocate}
+              onLocated={() => setPendingLocate(null)}
+              projectName={project?.name ?? "…"}
+            />
+          ) : (
+            <Canvas
             projectId={pid}
             project={project}
             graph={graph}
@@ -1115,6 +1132,7 @@ async function rebaseDraft() {
             lowInterference={lowInterference}
             mode={layout}
           />
+          )}
           {toast && <div className={`toast ${toast.kind === "err" ? "err" : "ok"}`}>{toast.msg}</div>}
           <ViewToolbar
             nodes={graph}

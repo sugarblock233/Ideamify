@@ -522,3 +522,33 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
   border: 1px solid var(--line); border-radius: 5px; background: none; color: var(--ink-dim);
 }
 .vtool .pop-item .seg.on { background: var(--sel); border-color: var(--sel); color: #fff; }
+
+/* outline list view (B3, DECISIONS §15) — replaces the canvas content when
+   the layout pref is 大纲; folds/branch state is the canvas's own, so rows
+   show exactly the visible tree */
+.outline-wrap {
+  position: absolute; inset: 0; overflow: auto;
+  padding: 16px 22px 40px; background: var(--bg, #fbfcfe);
+}
+.outline-head {
+  font-weight: 650; font-size: 15px; margin: 2px 0 12px;
+  display: flex; align-items: center; gap: 8px; color: var(--ink);
+}
+.outline-glyph { font-size: 12px; color: var(--ink-dim); }
+.outline-head .outline-glyph { color: var(--sel); }
+.outline-row {
+  position: relative;
+  display: flex; align-items: center; gap: 8px;
+  min-height: 30px; padding-top: 3px; padding-right: 10px;
+  border-radius: 6px; cursor: pointer; line-height: 1.35;
+}
+.outline-row:hover { background: rgba(15, 23, 42, 0.05); }
+.outline-row.selected { background: #e9f0fc; box-shadow: inset 2px 0 0 var(--sel); }
+.outline-row .ofold {
+  position: static; transform: none; flex: none; margin-right: 2px;
+}
+.outline-status { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.outline-kind { flex: none; font-size: 11px; color: var(--ink-dim); }
+.outline-title { font-weight: 550; overflow-wrap: anywhere; }
+.outline-tags { display: inline-flex; gap: 4px; overflow: hidden; margin-left: 4px; }
+.outline-row.flash { animation: rm-flash 1.6s ease 2; }

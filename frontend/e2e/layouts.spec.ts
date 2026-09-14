@@ -89,3 +89,106 @@ test("切纵向树：父子沿 +Y 生长；切回横向恢复横向折叠集", a
   const vChild2 = await cardBox(page, "链2级");
   expect(vChild2.y).toBeGreaterThan(vParent2.y);
 });
+
+test("大纲视图：行语义与画布折叠一致；行点击选中；切回横向恢复画布", async ({ page }) => {
+  const ids = Array.from({ length: 3 }, () => crypto.randomUUID());
+  let r = await api(page, "POST", "/api/v1/projects", {
+    request_id: crypto.randomUUID(),
+    name: `E2E 大纲-${crypto.randomUUID().slice(0, 8)}`,
+    objective: "B3 大纲视图",
+  });
+  expect(r.status).toBe(200);
+  const pid = r.json.id as string;
+  const rev = (await api(page, "GET", `/api/v1/projects/${pid}`)).json.revision as number;
+  r = await api(page, "POST", `/api/v1/projects/${pid}/commits`, {
+    request_id: crypto.randomUUID(),
+    expected_revision: rev,
+    client_label: "seed-outline",
+    summary: "e2e 3级链",
+    operations: ids.map((id, i) => ({
+      op: "node.create", id, parent_id: i === 0 ? null : ids[i - 1],
+      kind: "idea", title: `链${i + 1}级`, summary: "大纲素材",
+      status: "in_progress",
+    })),
+  });
+  expect(r.status).toBe(200);
+
+  await enterStudio(page, pid);
+  await page.waitForSelector(".rm-card", { timeout: 20_000 });
+
+  await openMenu(page);
+  await page.getByTestId("vt-layout-outline").click();
+  await page.mouse.click(10, 300);
+
+  // 画布退场，行进位；语义同画布：默认折叠 → 链1、链2 两行
+  await expect(page.getByTestId("outline-view")).toBeVisible();
+  await expect(page.locator(".rm-card")).toHaveCount(0);
+  await expect(page.locator(".outline-row")).toHaveCount(2);
+
+  // 行折叠走同一折叠集：展开到 3 行 → 折叠链2 回 2 行
+  await page.getByTestId("vt-expand-all").click();
+  await expect(page.locator(".outline-row")).toHaveCount(3);
+  await page.locator(".outline-row", { hasText: "链2级" }).locator(".ofold").click();
+  await expect(page.locator(".outline-row")).toHaveCount(2);
+
+  // 行点击 = 选中（与 SidePanel 同一 selectNode）
+  await page.locator(".outline-row", { hasText: "链1级" }).click();
+  await expect(page.locator(".outline-row.selected", { hasText: "链1级" })).toBeVisible();
+
+  // 切回横向：大纲退场，画布带着自己的折叠集回来
+  await openMenu(page);
+  await page.getByTestId("vt-layout-h").click();
+  await page.mouse.click(10, 300);
+  await expect(page.locator(".rm-card")).toHaveCount(2);
+  await expect(page.getByTestId("outline-view")).toHaveCount(0);
+});
+
+test("大纲定位：搜索命中后展开祖先并 flash", async ({ page }) => {
+  const ids = Array.from({ length: 3 }, () => crypto.randomUUID());
+  let r = await api(page, "POST", "/api/v1/projects", {
+    request_id: crypto.randomUUID(),
+    name: `E2E 大纲定位-${crypto.randomUUID().slice(0, 8)}`,
+    objective: "B3 大纲 · 搜索定位",
+  });
+  expect(r.status).toBe(200);
+  const pid = r.json.id as string;
+  const rev = (await api(page, "GET", `/api/v1/projects/${pid}`)).json.revision as number;
+  r = await api(page, "POST", `/api/v1/projects/${pid}/commits`, {
+    request_id: crypto.randomUUID(),
+    expected_revision: rev,
+    client_label: "seed-olocate",
+    summary: "e2e 3级链",
+    operations: ids.map((id, i) => ({
+      op: "node.create", id, parent_id: i === 0 ? null : ids[i - 1],
+      kind: "idea", title: `定位链${i + 1}级`, summary: "定位素材",
+      status: "in_progress",
+    })),
+  });
+  expect(r.status).toBe(200);
+
+  await enterStudio(page, pid);
+  await page.waitForSelector(".rm-card", { timeout: 20_000 });
+
+  await openMenu(page);
+  await page.getByTestId("vt-layout-outline").click();
+  await page.mouse.click(10, 300);
+  await expect(page.getByTestId("outline-view")).toBeVisible();
+
+  // 全部折叠 → 只剩链1 一行；搜索链3 必须命中并带出祖先
+  await page.getByTestId("vt-collapse-all").click();
+  await expect(page.locator(".outline-row")).toHaveCount(1);
+  await page.getByPlaceholder("搜索标题/摘要/标签/观察/结论（中文子串可用）").fill("定位链3");
+  await page.locator(".pop-item", { hasText: "定位链3级" }).first().click();
+  await expect(page.locator(".outline-row", { hasText: "定位链3级" })).toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await expect(page.locator(".outline-row")).toHaveCount(3);
+  // locateNode 选中 + OutlineView flash：类上同时有 selected 与 flash
+  await expect
+    .poll(
+      () =>
+        page.locator(".outline-row", { hasText: "定位链3级" }).first().getAttribute("class"),
+      { timeout: 4000 },
+    )
+    .toContain("selected flash");
+});
