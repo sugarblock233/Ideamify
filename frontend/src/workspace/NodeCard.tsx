@@ -6,7 +6,9 @@
  *  B1: `tier` picks the presentation tier (DECISIONS §14) — the card box is
  *  always CARD_W × CARD_H, tiers only change what is drawn (CSS classes
  *  `.tier-compact` / `.tier-overview` on styles.css). `low` is the 低干扰 mode
- *  (tags and relation/child counts hidden). */
+ *  (tags and relation/child counts hidden). `v` flips the (invisible) edge
+ *  handles to top/bottom for the vertical tree — edges must anchor at the
+ *  connector band, which in that orientation runs along the card's height. */
 
 import React from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
@@ -25,6 +27,8 @@ export interface CardData extends Record<string, unknown> {
   badgeCount?: number;
   tier?: DetailTier;
   low?: boolean;
+  /** B2: vertical tree — handles flip from left/right to top/bottom */
+  v?: boolean;
   onToggleFold?: (id: string) => void;
   onContextMenu?: (id: string, e: React.MouseEvent) => void;
 }
@@ -51,8 +55,8 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
         d.onContextMenu?.(n.id, e);
       }}
     >
-      <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0 }} />
+      <Handle type="target" position={d.v ? Position.Top : Position.Left} isConnectable={false} style={{ opacity: 0 }} />
+      <Handle type="source" position={d.v ? Position.Bottom : Position.Right} isConnectable={false} style={{ opacity: 0 }} />
       <div className="row1">
         <span className="kind-badge">{kindLabel(n.kind)}</span>
         <span

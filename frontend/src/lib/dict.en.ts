@@ -428,4 +428,9 @@ export const en: Record<keyof typeof zh, string> = {
   "b1.low.off": "Turn off low-interference mode",
   "b1.low.title": "Hide card labels, tags and relation/child counts (hovering a relation still shows its label)",
   "b1.zoom.locate": "Zoom to locate",
+
+  "layout.h": "Horizontal tree",
+  "layout.v": "Vertical tree",
+  "layout.outline": "Outline",
+  "vt.layout.title": "Switch canvas layout (folds/branch/viewport are remembered per layout)",
 };

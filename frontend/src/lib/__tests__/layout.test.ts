@@ -1,18 +1,22 @@
 /** T02 unit tests: the main-tree layout is deterministic and the placed
- *  cards never overlap. Also pins the SPEC 2.4 axis contract
- *  (canvasX = d3.y − W/2, canvasY = d3.x − H/2) and fold semantics
- *  (SPEC 2.4: a fold hides the subtree but keeps the folded node itself
- *  visible, and the fold button reports how many direct children are hidden). */
+ *  cards never overlap. B2 runs every structural contract in both canvas
+ *  orientations ("h" left-to-right per SPEC 2.4, "v" top-to-bottom per
+ *  DECISIONS §15); the mode-specific axis contracts are pinned per mode.
+ *  Also pins fold semantics (SPEC 2.4: a fold hides the subtree but keeps
+ *  the folded node itself visible, and the fold button reports how many
+ *  direct children are hidden). */
 
 import { describe, expect, it } from "vitest";
 import {
   buildTreeData,
   cardsOverlap,
   computeLayout,
+  NODE_SIZE,
+  NODE_SIZE_V,
   rootIdOf,
+  type LayoutMode,
   type PlacedNode,
-} from "../layout";
-import type { GraphNode, NodeKind, NodeStatus } from "../types";
+} from "../layout";import type { GraphNode, NodeKind, NodeStatus } from "../types";
 
 const PID = "p1";
 
@@ -59,22 +63,28 @@ function tree(): GraphNode[] {
   ];
 }
 
-describe("computeLayout", () => {
+describe.each<LayoutMode>(["h", "v"])("computeLayout ×%s (B2)", (mode) => {
+  const draw = (
+    nodes: GraphNode[],
+    folds: ReadonlySet<string> = new Set(),
+    branchRoot: string | null = null,
+  ) => computeLayout(PID, nodes, folds, branchRoot, mode);
+
   it("places the virtual root and every visible node", () => {
-    const r = computeLayout(PID, tree(), new Set(), null);
+    const r = draw(tree());
     expect(r.positions.has(rootIdOf(PID))).toBe(true);
     for (const n of tree()) expect(r.positions.has(n.id)).toBe(true);
     expect([...r.visibleIds].sort()).toEqual(["a", "a1", "a2", "a2x", "b", "b1", "c"]);
   });
 
   it("is deterministic (same input ⇒ identical coordinates)", () => {
-    const a = computeLayout(PID, tree(), new Set(), null);
-    const b = computeLayout(PID, tree(), new Set(), null);
+    const a = draw(tree());
+    const b = draw(tree());
     expect(JSON.stringify([...a.positions])).toBe(JSON.stringify([...b.positions]));
   });
 
   it("never overlaps two placed cards", () => {
-    const { positions } = computeLayout(PID, tree(), new Set(), null);
+    const { positions } = draw(tree());
     const list = [...positions.values()];
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
@@ -83,31 +93,36 @@ describe("computeLayout", () => {
     }
   });
 
-  it("environments children cards horizontally deeper than their parent " +
-    "(canvasX = d3.y − W/2, depth grows along +X)", () => {
-    const { positions } = computeLayout(PID, tree(), new Set(), null);
+  it("places children exactly one depth gap along the depth axis", () => {
+    const { positions } = draw(tree());
     const parent = positions.get("a")!;
     for (const kid of ["a1", "a2"]) {
       const c = positions.get(kid)!;
-      expect(c.x).toBeGreaterThan(parent.x);
-      // depth gap is NODE_SIZE[1] = 380 (canvasX = d3.y − W/2, d3.y = depth*380)
-      expect(c.x - parent.x).toBeCloseTo(380, 3);
+      // h: canvasX = d3.y − W/2 with d3.y = depth*NODE_SIZE[1] (SPEC 2.4)
+      // v: canvasY = d3.y − H/2 with d3.y = depth*NODE_SIZE_V[1] (§15)
+      if (mode === "h") {
+        expect(c.x).toBeGreaterThan(parent.x);
+        expect(c.x - parent.x).toBeCloseTo(NODE_SIZE[1], 3);
+      } else {
+        expect(c.y).toBeGreaterThan(parent.y);
+        expect(c.y - parent.y).toBeCloseTo(NODE_SIZE_V[1], 3);
+      }
     }
   });
 
   it("orders siblings by (order_index, id), not insertion order", () => {
     // shuffle the input array; canonical order must survive
     const shuffled = [...tree()].reverse();
-    const { positions } = computeLayout(PID, shuffled, new Set(), null);
+    const { positions } = draw(shuffled);
     const a = positions.get("a")!, b = positions.get("b")!, c = positions.get("c")!;
-    expect(a.y).toBeLessThan(b.y);
-    expect(b.y).toBeLessThan(c.y);
+    // siblings run along the sibling axis: +Y in h (axes swapped), +X in v
+    const sib = (p: PlacedNode): number => (mode === "h" ? p.y : p.x);
+    expect(sib(a)).toBeLessThan(sib(b));
+    expect(sib(b)).toBeLessThan(sib(c));
   });
-});
 
-describe("computeLayout · folds (SPEC 2.4)", () => {
-  it("keeps the folded node visible, hides its whole subtree, and counts hidden direct children", () => {
-    const { positions, visibleIds } = computeLayout(PID, tree(), new Set(["a2"]), null);
+  it("folds keep the folded node visible, hide its whole subtree, and count hidden direct children", () => {
+    const { positions, visibleIds } = draw(tree(), new Set(["a2"]));
     expect(positions.has("a2")).toBe(true); // the folded node itself stays
     expect(visibleIds.has("a2x")).toBe(false);
     expect(positions.has("a2x")).toBe(false); // and it is not placed
@@ -119,19 +134,17 @@ describe("computeLayout · folds (SPEC 2.4)", () => {
   });
 
   it("folding a top node hides all of its descendants", () => {
-    const { visibleIds } = computeLayout(PID, tree(), new Set(["a"]), null);
+    const { visibleIds } = draw(tree(), new Set(["a"]));
     expect(visibleIds.has("a")).toBe(true);
     expect(visibleIds.has("a1")).toBe(false);
     expect(visibleIds.has("a2")).toBe(false);
     expect(visibleIds.has("a2x")).toBe(false);
-    const a = computeLayout(PID, tree(), new Set(["a"]), null).positions.get("a")!;
+    const a = draw(tree(), new Set(["a"])).positions.get("a")!;
     expect(a.hiddenCount).toBe(2); // a1 and a2 are hidden direct children
   });
-});
 
-describe("computeLayout · branch focus (SPEC 2.4)", () => {
-  it("keeps only the chosen branch root's subtree, plus the focused node's ancestors", () => {
-    const { visibleIds } = computeLayout(PID, tree(), new Set(), "a2");
+  it("branch focus keeps only the chosen branch root's subtree", () => {
+    const { visibleIds } = draw(tree(), new Set(), "a2");
     // branchRoot is "a2": only a2 + its descendants (a2x); a1, b, c are out.
     expect(visibleIds.has("a2")).toBe(true);
     expect(visibleIds.has("a2x")).toBe(true);
@@ -140,6 +153,40 @@ describe("computeLayout · branch focus (SPEC 2.4)", () => {
     expect(visibleIds.has("c")).toBe(false);
     // the focused node's ancestors are NOT part of the branch tree (a is hidden)
     expect(visibleIds.has("a")).toBe(false);
+  });
+});
+
+/** h keeps the SPEC 2.4 axis contract verbatim (it is the byte-identical
+ *  orientation); v reverses the depth axis onto +Y. */
+describe("computeLayout · h axis contract (SPEC 2.4)", () => {
+  it("environments children cards horizontally deeper than their parent (depth grows along +X)", () => {
+    const { positions } = computeLayout(PID, tree(), new Set(), null, "h");
+    const parent = positions.get("a")!;
+    for (const kid of ["a1", "a2"]) {
+      const c = positions.get(kid)!;
+      expect(c.x).toBeGreaterThan(parent.x);
+      // depth gap is NODE_SIZE[1] = 380 (canvasX = d3.y − W/2, d3.y = depth*380)
+      expect(c.x - parent.x).toBeCloseTo(380, 3);
+    }
+  });
+});
+
+describe("computeLayout v · mode constant (DECISIONS §15)", () => {
+  it("spreads d3's(+X) sibling axis so same-depth top-levels share a row", () => {
+    const { positions } = computeLayout(PID, tree(), new Set(), null, "v");
+    const a = positions.get("a")!, b = positions.get("b")!, c = positions.get("c")!;
+    // depth runs down (+Y), so top-level siblings line up in one row along
+    // +X... sibling gaps grow with subtree widths (d3 separation), so pin
+    // the row + order, not an exact step.
+    expect(a.y).toBe(b.y);
+    expect(b.y).toBe(c.y);
+    expect(a.x).toBeLessThan(b.x);
+    expect(b.x).toBeLessThan(c.x);
+    // …and each card keeps the shared constant size in the vertical mode too
+    const a1 = positions.get("a1")!, a2 = positions.get("a2")!;
+    expect(a1.y - a.y).toBeCloseTo(NODE_SIZE_V[1], 3);
+    expect(a2.y - a.y).toBeCloseTo(NODE_SIZE_V[1], 3);
+    expect(a1.x).not.toBe(a2.x); // a1/a2 side by side, not stacked onto a
   });
 });
 

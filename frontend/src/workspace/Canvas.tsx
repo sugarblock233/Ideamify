@@ -1,12 +1,16 @@
 /** Main-tree canvas (SPEC 2.4 / 2.5 / 3.x).
 
 Viewport stability rules implemented here:
-- layout is a pure function of (graph, folds, branchRoot); content-only
+- layout is a pure function of (graph, folds, branchRoot, mode); content-only
   changes never move coordinates;
 - on a structural change the selected node's screen position is kept
   (anchor fallback: the virtual root), zoom unchanged;
 - only first open, "适应当前图" and explicit user navigation (search /
   locate / branch focus) touch the viewport — never a poll or refresh.
+
+B2: `mode` picks the layout strategy (h = horizontal, v = vertical tree;
+"outline" never reaches Canvas). Fold/branch/viewport save-view state lives
+in the mode's own `rm.view.<pid>.layouts.<mode>` slot.
 */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,7 +28,7 @@ import {
 import { computeLayout, CARD_W, CARD_H, rootIdOf, type LayoutResult } from "../lib/layout";
 import { STATUS_COLOR, STATUS_GLYPH } from "../lib/format";
 import { resolveTier, type DetailTier } from "../lib/detailLevel";
-import type { DensityMode } from "../lib/viewPrefs";
+import type { DensityMode, LayoutMode } from "../lib/viewPrefs";
 import type { GraphNode, NodeStatus, Project, RelationItem } from "../lib/types";
 import { selectCanvasRelations } from "../lib/relations";
 import { NodeCard, type CardData } from "./NodeCard";
@@ -43,8 +47,9 @@ const edgeTypes = { relation: RelationEdge };
 export const READABLE_ZOOM = 0.7;
 
 // Saved-view storage now lives in lib/viewPrefs.ts ( SavedView v2, per-layout
-// slots). Re-exported here so the existing Canvas readers keep one import site.
-import { loadSavedView, saveView } from "../lib/viewPrefs";
+// slots). loadSavedView/saveView stay the legacy ("h" slot) accessors; the
+// canvas reads/writes the slot matching its own layout mode.
+import { loadLayoutView, saveLayoutView } from "../lib/viewPrefs";
 
 export { loadSavedView, saveView } from "../lib/viewPrefs";
 
@@ -75,12 +80,17 @@ export interface CanvasProps {
    *  低干扰 choice — both browser prefs, never server state. */
   density: DensityMode;
   lowInterference: boolean;
+  /** B2: layout strategy ("h"/"v" here; "outline" renders its own list view
+   *  and is defensively mapped to "h" should it ever reach Canvas). */
+  mode: LayoutMode;
 }
 
 function Inner(p: CanvasProps) {
   const t = useT();
   const flow = useReactFlow();
   const readyRef = useRef(false);
+  // B2: canvas tree orientation ("outline" never draws cards on a canvas).
+  const treeMode: "h" | "v" = p.mode === "v" ? "v" : "h";
   const [hoveredRel, setHoveredRel] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null);
   // A08: “稍后” only dismisses the banner — the pending update stays until the
@@ -116,8 +126,8 @@ function Inner(p: CanvasProps) {
 
   // ---- layout (pure, deterministic) --------------------------------------
   const layout: LayoutResult = useMemo(
-    () => computeLayout(p.projectId, p.graph, p.folds, p.branchRoot),
-    [p.projectId, p.graph, p.folds, p.branchRoot],
+    () => computeLayout(p.projectId, p.graph, p.folds, p.branchRoot, treeMode),
+    [p.projectId, p.graph, p.folds, p.branchRoot, treeMode],
   );
   // structKey must change for ANY structural change — including same-count
   // re-parenting / sibling reordering — so positions (not just their count)
@@ -134,7 +144,9 @@ function Inner(p: CanvasProps) {
 
   const positionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const selectedRef = useRef<string | null>(null);
-  const didInitialFit = useRef(false);
+  /** B2: which layout mode the initial / saved viewport was last applied
+   *  for — switching layouts re-applies that layout's own slot. */
+  const didInitialFit = useRef<LayoutMode | null>(null);
 
   useEffect(() => {
     selectedRef.current = p.selectedId;
@@ -175,6 +187,7 @@ function Inner(p: CanvasProps) {
           name: p.project?.name ?? "…",
           objective: p.project?.objective ?? "",
           revision: p.project?.revision ?? 0,
+          v: treeMode === "v",
         } as RootData,
       });
     }
@@ -199,6 +212,7 @@ function Inner(p: CanvasProps) {
           badgeCount: p.marks.badges.get(n.id),
           tier,
           low: p.lowInterference,
+          v: treeMode === "v",
           onToggleFold,
           onContextMenu: onCtx,
         } as CardData,
@@ -207,7 +221,7 @@ function Inner(p: CanvasProps) {
     return out;
     // structKey covers graph/folds/branchRoot; marks/relations refresh data
     // without needing structural bookkeeping.
-  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, onToggleFold, onCtx, tier, p.lowInterference]);
+  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, onToggleFold, onCtx, tier, p.lowInterference, treeMode]);
 
   // Selected node's direct relations eligible for canvas lines (≤ MAX_CANVAS_RELATION).
   const shownRels = useMemo(() => {
@@ -364,10 +378,11 @@ function Inner(p: CanvasProps) {
   }, []);
 
   useEffect(() => {
-    if (!readyRef.current || didInitialFit.current) return;
+    if (!readyRef.current || didInitialFit.current === p.mode) return;
     if (layout.positions.size < 2) return;
-    didInitialFit.current = true;
-    const saved = loadSavedView(p.projectId).viewport;
+    didInitialFit.current = p.mode;
+    // B2: this layout's own saved slot (v1 blobs were migrated into "h")
+    const saved = loadLayoutView(p.projectId, p.mode).viewport;
     if (saved) {
       flow.setViewport(saved, { duration: 0 });
       return;
@@ -385,36 +400,44 @@ function Inner(p: CanvasProps) {
     // the nearest route can sit most of a screen away from the anchor. Aim the
     // camera at the midpoint of the two — which shows both whenever they fit —
     // but never further than keeps that route fully on screen. Routes beyond
-    // it are one pan (or 「适应当前图」) away.
+    // it are one pan (or 「适应当前图」) away. The routes spread along the
+    // sibling axis (canvas +Y in h, +X in v — DECISIONS §15).
     let nearest = Infinity;
     for (const n of p.graph) {
       if (p.branchRoot ? n.parent_id !== p.branchRoot : n.parent_id !== null) continue;
       const pos = layout.positions.get(n.id);
       if (!pos) continue;
-      const d = pos.y + CARD_H / 2 - anchorCy;
+      const d = treeMode === "v" ? pos.x + CARD_W / 2 - anchorCx : pos.y + CARD_H / 2 - anchorCy;
       if (Math.abs(d) < Math.abs(nearest)) nearest = d;
     }
     // layout px from the camera centre to the centre of a fully-visible card
-    const reach = Math.max(h / (2 * zoom) - CARD_H / 2, 0);
+    const half = treeMode === "v" ? w / 2 : h / 2;
+    const cardHalf = treeMode === "v" ? CARD_W / 2 : CARD_H / 2;
+    const reach = Math.max(half / zoom - cardHalf, 0);
     const shift = Number.isFinite(nearest)
       ? Math.max(nearest - reach, Math.min(nearest + reach, nearest / 2))
       : 0;
 
-    // Bias the anchor left of centre: routes hang off it to the right (depth
-    // axis), so they deserve the bulk of the viewport width.
+    // Bias the anchor against the depth axis: h routes hang off it to the
+    // right (+X), so it sits left of centre; v routes hang downward (+Y), so
+    // it sits above centre. The rest of the map is one pan away.
     flow.setViewport(
-      { x: w * 0.25 - anchorCx * zoom, y: h / 2 - (anchorCy + shift) * zoom, zoom },
+      treeMode === "v"
+        ? { x: w / 2 - (anchorCx + shift) * zoom, y: h * 0.25 - anchorCy * zoom, zoom }
+        : { x: w * 0.25 - anchorCx * zoom, y: h / 2 - (anchorCy + shift) * zoom, zoom },
       { duration: 0 },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, p.graph, p.branchRoot, p.projectId]);
+  }, [layout, p.graph, p.branchRoot, p.projectId, p.mode]);
 
   const onMoveEnd = useCallback(() => {
-    const v = loadSavedView(p.projectId);
+    // B2: each layout keeps its own saved viewport (same-slot read-modify-write
+    // as the h tree has always used).
+    const v = loadLayoutView(p.projectId, p.mode);
     const vp = flow.getViewport();
-    saveView(p.projectId, { ...v, viewport: { x: vp.x, y: vp.y, zoom: vp.zoom } });
+    saveLayoutView(p.projectId, p.mode, { ...v, viewport: { x: vp.x, y: vp.y, zoom: vp.zoom } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.projectId, flow]);
+  }, [p.projectId, p.mode, flow]);
 
   const clearCtx = useCallback(() => setCtxMenu(null), []);
 
@@ -448,14 +471,15 @@ function Inner(p: CanvasProps) {
         proOptions={{ hideAttribution: false }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="#c9ced6" />
-        {/* Portrait, and no taller than the default: a left-to-right tree grows
-            far taller than it is wide, so a landscape minimap spends most of
-            its width on padding — but the widget floats over the canvas and
-            swallows clicks, so its footprint must not grow either. */}
+        {/* Same footprint floating over the canvas in both orientations (the
+            widget swallows clicks, so it must not grow): portrait for h — a
+            left-to-right tree grows far taller than it is wide, so a landscape
+            minimap would spend most of its width on padding — landscape for v,
+            where the tree grows wide. */}
         <MiniMap
           pannable
           zoomable
-          style={{ width: 120, height: 150 }}
+          style={treeMode === "v" ? { width: 150, height: 120 } : { width: 120, height: 150 }}
           maskColor="rgba(29,36,48,0.12)"
           maskStrokeColor="#5c6675"
           maskStrokeWidth={2}

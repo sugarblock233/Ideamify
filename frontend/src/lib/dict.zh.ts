@@ -431,6 +431,12 @@ export const zh = {
   "b1.low.off": "关闭低干扰模式",
   "b1.low.title": "隐藏卡片的标签、关联数与子节点数（悬停关系线仍可看标签）",
   "b1.zoom.locate": "放大定位",
+
+  // ---- 布局策略（B2，DECISIONS §15） ---------------------------------------------------
+  "layout.h": "横向树",
+  "layout.v": "纵向树",
+  "layout.outline": "大纲",
+  "vt.layout.title": "切换画布布局（每个布局分别记住折叠/分支/视口）",
 } as const;
 
 export type DictKey = keyof typeof zh;

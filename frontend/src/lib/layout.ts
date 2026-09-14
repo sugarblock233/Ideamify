@@ -6,23 +6,44 @@ the fold set. Cross-branch relations NEVER enter this module. The same
 edits (title/summary/status/evidence/relations) never relayout — callers
 only rerun this when the tree structure or folds change.
 
-Per SPEC 2.4: `tree().nodeSize([176, 380])` with d3's axes swapped for a
-left-to-right canvas, then half the card size subtracted for top-left
-coordinates. Verified against d3-hierarchy 3.1.2 source
-(`node.y = depth * dy`): d3.x is the sibling axis, d3.y the depth axis.
+Two canvas orientations share this d3 geometry (DECISIONS §15): "h" is the
+SPEC 2.4 left-to-right tree (axes swapped) and "v" is the top-to-bottom tree
+(axes direct). Both keep the same CARD_W × CARD_H cards; only the d3 node
+size and the mapping differ.
 
-    canvasX = d3.y - CARD_W / 2
-    canvasY = d3.x - CARD_H / 2
+    h: canvasX = d3.y - CARD_W / 2      v: canvasX = d3.x - CARD_W / 2
+       canvasY = d3.x - CARD_H / 2         canvasY = d3.y - CARD_H / 2
 */
 
 import { hierarchy, tree, type HierarchyNode, type HierarchyPointNode } from "d3-hierarchy";
 import type { GraphNode } from "./types";
+import type { LayoutMode } from "./viewPrefs";
+
+export type { LayoutMode } from "./viewPrefs";
 
 export const CARD_W = 280;
 export const CARD_H = 144;
 /** [siblingGap, depthGap]; depth gap > card width so connectors fit. */
 export const NODE_SIZE: [number, number] = [176, 380];
+/** 纵向树 (DECISIONS §15): the depth axis runs down the canvas and siblings
+ *  spread across, so the gaps re-balance — sibling axis 344 = card 280 + 64
+ *  groove keeps the horizontal tree's 176:280 ≈ air ratio relative to the
+ *  card (344:280), and the depth axis 208 = card height 144 + 64 connector
+ *  band. Cards stay 280 × 144 in every mode. */
+export const NODE_SIZE_V: [number, number] = [344, 208];
 export const rootIdOf = (pid: string) => `project:${pid}`;
+
+/** Per-mode placement strategy: d3's sibling/depth geometry is shared, only
+ *  the node size and the canvas mapping differ. */
+interface LayoutStrategy {
+  nodeSize: [number, number];
+  toCanvas: (d3x: number, d3y: number) => { x: number; y: number };
+}
+
+const TREE_STRATEGIES: Record<"h" | "v", LayoutStrategy> = {
+  h: { nodeSize: NODE_SIZE, toCanvas: (d3x, d3y) => ({ x: d3y - CARD_W / 2, y: d3x - CARD_H / 2 }) },
+  v: { nodeSize: NODE_SIZE_V, toCanvas: (d3x, d3y) => ({ x: d3x - CARD_W / 2, y: d3y - CARD_H / 2 }) },
+};
 
 export interface PlacedNode {
   id: string;
@@ -146,11 +167,19 @@ export function buildTreeData(
   return { root, visibleIds: visible };
 }
 
+/** Main-tree coordinates for one canvas orientation.
+ *
+ *  The default (mode "h") keeps the horizontal tree's original output
+ *  byte-for-byte. "v" places the same tree top-to-bottom. "outline" never
+ *  reaches layout (it renders its own list view, B3) but the type accepts it
+ *  so callers can pass a LayoutMode straight through; a defensively mapped
+ *  "outline" behaves like "h". */
 export function computeLayout(
   projectId: string,
   nodes: GraphNode[],
   folds: ReadonlySet<string>,
   branchRoot: string | null,
+  mode: LayoutMode = "h",
 ): LayoutResult {
   const rootId = rootIdOf(projectId);
   const empty: LayoutResult = { positions: new Map(), rootId, visibleIds: new Set() };
@@ -158,6 +187,8 @@ export function computeLayout(
 
   const { root, visibleIds } = buildTreeData(nodes, folds, branchRoot);
   if (!root) return empty;
+
+  const strat = mode === "v" ? TREE_STRATEGIES.v : TREE_STRATEGIES.h;
 
   const toD3 = (l: TreeLeaf): D3Node => ({
     id: l.id,
@@ -170,23 +201,24 @@ export function computeLayout(
     (d) => d.children,
   );
   // Children are pre-sorted to (order_index, id); d3 preserves that order.
-  tree<D3Node>().nodeSize(NODE_SIZE)(hRoot);
+  tree<D3Node>().nodeSize(strat.nodeSize)(hRoot);
 
   const positions = new Map<string, PlacedNode>();
   const walk = (h: HierarchyNode<D3Node>): void => {
     // tree() (TypedHierarchyPointNode) always fills x/y by the time it has
     // run; the narrow cast documents that contract.
     const p = h as HierarchyPointNode<D3Node>;
+    const c = strat.toCanvas(p.x, p.y);
     positions.set(p.data.id, {
       id: p.data.id,
-      x: p.y - CARD_W / 2,
-      y: p.x - CARD_H / 2,
+      x: c.x,
+      y: c.y,
       width: CARD_W,
       height: CARD_H,
       hiddenCount: p.data.hidden,
       depth: p.depth,
     });
-    for (const c of h.children ?? []) walk(c);
+    for (const child of h.children ?? []) walk(child);
   };
   walk(hRoot);
 

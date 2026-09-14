@@ -4,6 +4,7 @@
  *  - 全部展开 clears the whole fold set (the visible count is on the label);
  *  - the ▾ menu holds 展开到第 1–3 层, 展开选中节点的分支, single-step
  *    恢复上次 (Workspace owns the pre-batch snapshot),
+ *    the B2 layout switcher (横向/纵向/大纲, each with its own saved view),
  *    the B1 density lock (阅读/精简/概览/自动, DECISIONS §14) and the
  *    低干扰 toggle — view prefs, both written to rm.prefs.<pid> by Workspace.
  *  - tools never write the branchRoot filter — "不清过滤" is asserted in e2e;
@@ -17,7 +18,7 @@ import {
   expandSubtreeFolds,
   expandToLevelFolds,
 } from "../lib/expandTools";
-import type { DensityMode } from "../lib/viewPrefs";
+import type { DensityMode, LayoutMode } from "../lib/viewPrefs";
 import { useT } from "../lib/i18n";
 import type { GraphNode } from "../lib/types";
 
@@ -30,6 +31,9 @@ export interface ViewToolbarProps {
   onReplaceFolds: (next: ReadonlySet<string>) => void;
   onRestoreLast: () => void;
   canRestore: boolean;
+  /** B2: layout strategy — Workspace snapshots the outgoing layout's view */
+  layout: LayoutMode;
+  onSetLayout: (mode: LayoutMode) => void;
   /** B1/B4: density lock + 低干扰 (browser prefs owned by Workspace) */
   density: DensityMode;
   onSetDensity: (mode: DensityMode) => void;
@@ -38,6 +42,7 @@ export interface ViewToolbarProps {
 }
 
 const DENSITY_ORDER: DensityMode[] = ["reading", "compact", "overview", "auto"];
+const LAYOUTS: LayoutMode[] = ["h", "v", "outline"];
 
 export default function ViewToolbar(p: ViewToolbarProps) {
   const t = useT();
@@ -137,6 +142,20 @@ export default function ViewToolbar(p: ViewToolbarProps) {
               }}
             >
               {t("a6.restore")}
+            </div>
+            {/* B2 layout switch: 横向树/纵向树/大纲. Menu clicks do NOT close
+                the menu (density lock below relies on the same contract). */}
+            <div className="pop-item dotmenu-line" data-testid="vt-layout" role="radiogroup" title={t("vt.layout.title")}>
+              {LAYOUTS.map((m) => (
+                <button
+                  key={m}
+                  className={p.layout === m ? "seg on" : "seg"}
+                  data-testid={`vt-layout-${m}`}
+                  onClick={() => { p.onSetLayout(m); }}
+                >
+                  {t(`layout.${m}`)}
+                </button>
+              ))}
             </div>
             {/* B4 density lock: 阅读/精简/概览/自动 — "auto" resolves tiers
                 from zoom with hysteresis (lib/detailLevel.ts). */}

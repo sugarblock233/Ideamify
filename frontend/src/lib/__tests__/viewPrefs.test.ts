@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  hasLayoutView,
   loadAppPrefs,
   loadLayoutView,
   loadProjectViewPrefs,
@@ -39,6 +40,22 @@ describe("SavedView v1 → v2 migration", () => {
     expect(v.folds).toEqual(["a", "b"]);
     expect(v.branchRoot).toBe("route1");
     expect(v.viewport).toEqual({ x: 10, y: 20, zoom: 0.7 });
+  });
+
+  it("hasLayoutView: absent slot vs explicit entry (B2 virgin semantics)", () => {
+    // nothing saved at all: both slots are virgin
+    expect(hasLayoutView(PID, "h")).toBe(false);
+    expect(hasLayoutView(PID, "v")).toBe(false);
+    // an explicit expand-all-without-viewport entry IS an entry
+    saveLayoutView(PID, "v", { folds: [], branchRoot: null, viewport: null });
+    expect(hasLayoutView(PID, "v")).toBe(true);
+    expect(hasLayoutView(PID, "h")).toBe(false);
+    // a v1 blob hands "h" its entry without being written as v2
+    localStorage.setItem(
+      `rm.view.${PID}`,
+      JSON.stringify({ folds: [], branchRoot: null, viewport: null }),
+    );
+    expect(hasLayoutView(PID, "h")).toBe(true);
   });
 
   it("writes v2 with the version field and keeps sibling layout slots", () => {

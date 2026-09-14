@@ -104,6 +104,13 @@ export function loadLayoutView(pid: string, layout: LayoutMode): LayoutView {
   return { folds: [...hit.folds], branchRoot: hit.branchRoot, viewport: hit.viewport ? { ...hit.viewport } : null };
 }
 
+/** Whether this layout has its own saved-view entry at all. v2 knows the
+ *  difference between "never opened this layout" and "opened and explicitly
+ *  expanded everything" — which A03's viewport-based heuristic could not. */
+export function hasLayoutView(pid: string, layout: LayoutMode): boolean {
+  return parseSavedStore(readJson(VIEW_KEY(pid))).layouts[layout] !== undefined;
+}
+
 /** Patch one layout's saved view (merge, never clobber the sibling layouts). */
 export function saveLayoutView(pid: string, layout: LayoutMode, v: LayoutView): void {
   const store = parseSavedStore(readJson(VIEW_KEY(pid)));

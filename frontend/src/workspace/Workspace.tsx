@@ -25,8 +25,16 @@ import {
 import { statusLabel } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { replaceDeepLink } from "../lib/deeplink";
-import Canvas, { loadSavedView, saveView } from "./Canvas";
-import { loadProjectViewPrefs, saveProjectViewPrefs, type DensityMode } from "../lib/viewPrefs";
+import Canvas from "./Canvas";
+import {
+  loadLayoutView,
+  saveLayoutView,
+  hasLayoutView,
+  loadProjectViewPrefs,
+  saveProjectViewPrefs,
+  type DensityMode,
+  type LayoutMode,
+} from "../lib/viewPrefs";
 import SidePanel, {
   draftFieldLabel,
   type Draft,
@@ -105,7 +113,20 @@ export default function Workspace({
   const [commitCursor, setCommitCursor] = useState<string | null>(null);
   const [commitHasMore, setCommitHasMore] = useState(false);
 
-  const saved0 = useMemo(() => loadSavedView(pid), [pid]);
+  // B2: canvas layout (per-project pref). Reset during render on a project
+  // switch — before any effect fires, so saved0/first-load read the slot of
+  // the layout the new project actually opens with.
+  const [layout, setLayoutRaw] = useState<LayoutMode>(() => loadProjectViewPrefs(pid).layout);
+  const [viewPid, setViewPid] = useState(pid);
+  if (viewPid !== pid) {
+    setViewPid(pid);
+    setLayoutRaw(loadProjectViewPrefs(pid).layout);
+  }
+
+  const saved0 = useMemo(
+    () => loadLayoutView(pid, layout),
+    [pid, layout],
+  );
   const [folds, setFoldsRaw] = useState<ReadonlySet<string>>(new Set(saved0.folds));
   const [branchRoot, setBranchRoot] = useState<string | null>(saved0.branchRoot);
 
@@ -459,11 +480,34 @@ export default function Workspace({
     setCanRestore(false);
   }, [pid]);
 
-  /* persist view state (folds / branch / viewport handled by Canvas) */
+  // B2: layout switching (DECISIONS §15). Each layout owns its fold/branch/
+  // viewport slot; the outgoing layout's view is snapshotted before the
+  // incoming slot's own saved view loads. Viewports save continuously to the
+  // outgoing slot via Canvas's onMoveEnd, so only folds/branch are written here.
+  const switchLayout = useCallback(
+    (next: LayoutMode) => {
+      if (next === layout) return;
+      const cur = loadLayoutView(pid, layout);
+      saveLayoutView(pid, layout, { ...cur, folds: [...folds], branchRoot });
+      saveProjectViewPrefs(pid, { layout: next });
+      const inc = loadLayoutView(pid, next);
+      // Virgin slot (never opened this layout — v2 stores that fact, which
+      // the A03 first-load heuristic approximates for the "h" tree) opens
+      // with the default two-level expansion; an explicit entry restores
+      // verbatim, even when the user expanded everything without panning.
+      setFoldsRaw(hasLayoutView(pid, next) ? new Set(inc.folds) : initialFolds(graph));
+      setBranchRoot(inc.branchRoot);
+      setLayoutRaw(next);
+    },
+    [pid, layout, folds, branchRoot, graph],
+  );
+
+  /* persist view state (folds / branch / viewport handled by Canvas) into the
+     CURRENT layout's slot (B2: per-layout saved views) */
   useEffect(() => {
-    const v = loadSavedView(pid);
-    saveView(pid, { ...v, folds: [...folds], branchRoot });
-  }, [folds, branchRoot, pid]);
+    const v = loadLayoutView(pid, layout);
+    saveLayoutView(pid, layout, { ...v, folds: [...folds], branchRoot });
+  }, [folds, branchRoot, pid, layout]);
 
   /* ------------------------------- first load ----------------------------- */
 
@@ -1069,6 +1113,7 @@ async function rebaseDraft() {
             onToast={ironToast}
             density={density}
             lowInterference={lowInterference}
+            mode={layout}
           />
           {toast && <div className={`toast ${toast.kind === "err" ? "err" : "ok"}`}>{toast.msg}</div>}
           <ViewToolbar
@@ -1083,6 +1128,8 @@ async function rebaseDraft() {
             onToggleLowInterference={toggleLowInterference}
             density={density}
             onSetDensity={setDensity}
+            layout={layout}
+            onSetLayout={switchLayout}
           />
         </div>
 
