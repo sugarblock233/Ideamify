@@ -209,13 +209,9 @@ function ProjectInfo({ project }: { project: Project | null }) {
 function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
   const t = useT();
   const [editing, setEditing] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [previewMd, setPreviewMd] = useState(false);
   // B01: switching nodes always returns to the read view.
   useEffect(() => {
     setEditing(false);
-    setDetailsOpen(false);
-    setPreviewMd(false);
   }, [n.id]);
   const d = p.draft ?? draftOf(n);
   const set = (patch: Partial<Draft>) => p.setDraft({ ...d, ...patch });
@@ -298,12 +294,73 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
       )}
 
       {editing ? (
-        <div className="editform">
-          <div className="row" style={{ marginBottom: 8 }}>
-            <span className="muted">{t("edit.mode.hint")}</span>
-          </div>
+        <NodeFieldsForm d={d} set={set} />
+      ) : (
+        <ReadView n={n} />
+      )}
 
-          <label className="field">{t("edit.kindstatus")}</label>
+      <div className="savebar">
+        {editing ? (
+          <>
+            <button
+              className="primary"
+              onClick={p.onSave}
+              disabled={!p.dirty || !d.title.trim() || p.draftStale || p.conflicts.length > 0}
+              title={
+                p.conflicts.length > 0
+                  ? t("detail.save.blocked.conflicts", { n: p.conflicts.length })
+                  : p.draftStale
+                    ? t("detail.save.blocked.stale")
+                    : undefined
+              }
+            >
+              {t("modal.common.save")}
+            </button>
+            <button onClick={p.onDiscardDraft} disabled={!p.dirty}>
+              {t("detail.cancel.revert")}
+            </button>
+            <button onClick={() => setEditing(false)}>{t("detail.collapse.edit")}</button>
+          </>
+        ) : (
+          <>
+            {p.dirty && <span className="chip">{t("detail.dirty.chip")}</span>}
+            <button className="primary" onClick={() => setEditing(true)}>
+              {t("detail.edit")}
+            </button>
+            <button onClick={p.onCreateChild} disabled={n.archived}>
+              {t("detail.add.child")}
+            </button>
+          </>
+        )}
+      </div>
+
+      {p.organization && <OrganizationTab org={p.organization} node={n} />}
+      {n.archived && (
+        <div style={{ marginTop: 10 }} className="hint err">
+          {t("detail.archived.notice")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------- shared node fields form (C1) ---------------------- */
+
+/** Controlled editor for every node content field, shared by the detail tab
+ *  (editing an existing node) and the canvas draft session (C2: creating a
+ *  node). Purely presentational — validation, gating and save live with the
+ *  caller. */
+export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draft>) => void }) {
+  const t = useT();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [previewMd, setPreviewMd] = useState(false);
+  return (
+    <div className="editform">
+      <div className="row" style={{ marginBottom: 8 }}>
+        <span className="muted">{t("edit.mode.hint")}</span>
+      </div>
+
+      <label className="field">{t("edit.kindstatus")}</label>
       <div style={{ display: "flex", gap: 8 }}>
         <select value={d.kind} onChange={(e) => set({ kind: e.target.value as NodeKind })}>
           {NODE_KINDS.map((k) => (
@@ -442,52 +499,6 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         >
           {t("edit.ev.add")}
         </button>
-      )}
-        </div>
-      ) : (
-        <ReadView n={n} />
-      )}
-
-      <div className="savebar">
-        {editing ? (
-          <>
-            <button
-              className="primary"
-              onClick={p.onSave}
-              disabled={!p.dirty || !d.title.trim() || p.draftStale || p.conflicts.length > 0}
-              title={
-                p.conflicts.length > 0
-                  ? t("detail.save.blocked.conflicts", { n: p.conflicts.length })
-                  : p.draftStale
-                    ? t("detail.save.blocked.stale")
-                    : undefined
-              }
-            >
-              {t("modal.common.save")}
-            </button>
-            <button onClick={p.onDiscardDraft} disabled={!p.dirty}>
-              {t("detail.cancel.revert")}
-            </button>
-            <button onClick={() => setEditing(false)}>{t("detail.collapse.edit")}</button>
-          </>
-        ) : (
-          <>
-            {p.dirty && <span className="chip">{t("detail.dirty.chip")}</span>}
-            <button className="primary" onClick={() => setEditing(true)}>
-              {t("detail.edit")}
-            </button>
-            <button onClick={p.onCreateChild} disabled={n.archived}>
-              {t("detail.add.child")}
-            </button>
-          </>
-        )}
-      </div>
-
-      {p.organization && <OrganizationTab org={p.organization} node={n} />}
-      {n.archived && (
-        <div style={{ marginTop: 10 }} className="hint err">
-          {t("detail.archived.notice")}
-        </div>
       )}
     </div>
   );
