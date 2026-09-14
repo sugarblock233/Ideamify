@@ -120,6 +120,47 @@ const api = {
     }
     return res.blob();
   },
+  /** D3: managed attachment bytes. Bearer goes in the header only — it must
+   *  never appear in an <img> URL (D 批 §9.2). */
+  attachmentBlob: async (aid: string) => {
+    const headers: Record<string, string> = {};
+    if (token) headers["authorization"] = `Bearer ${token}`;
+    const res = await fetch(`/api/v1/attachments/${aid}`, { headers });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: { code?: string; message?: string; details?: Record<string, unknown> };
+      } | null;
+      throw new ApiError(res.status, body?.error?.code ?? "UNKNOWN", body?.error?.message ?? `HTTP ${res.status}`, body?.error?.details ?? {});
+    }
+    return res.blob();
+  },
+  /** D3: multipart upload → staged attachment row (route-level 10MB/pixel
+   *  checks live server-side; here just a plain multipart POST). */
+  uploadAttachment: async (pid: string, file: File) => {
+    const headers: Record<string, string> = {};
+    if (token) headers["authorization"] = `Bearer ${token}`;
+    const fd = new FormData();
+    fd.append("file", file);
+    let res: Response;
+    try {
+      res = await fetch(`/api/v1/projects/${pid}/attachments`, { method: "POST", headers, body: fd });
+    } catch (e) {
+      throw new ApiError(0, "NETWORK", t("api.err.network"), { detail: String(e) });
+    }
+    const text = await res.text();
+    let body: unknown = null;
+    try { body = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+    if (!res.ok) {
+      const e = (body as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null)?.error;
+      throw new ApiError(res.status, e?.code ?? "UNKNOWN", e?.message ?? `HTTP ${res.status}`, e?.details ?? {});
+    }
+    return body as {
+      id: string; project_id: string; mime: string; bytes: number;
+      sha256: string; width: number | null; height: number | null;
+      original_name: string | null; state: string;
+      created_by: string; created_at: string;
+    };
+  },
 };
 
 export const uuidv4 = (): string =>

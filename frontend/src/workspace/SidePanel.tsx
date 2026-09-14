@@ -1,7 +1,7 @@
 /** Right panel: node detail + edit (save/cancel), relations list with
  *  pagination, node history with before/after (SPEC 3.2 / 3.3 / 3.5). */
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type {
   ChangeEntry,
   CommitDetail,
@@ -18,7 +18,10 @@ import { NODE_KINDS, NODE_STATUSES, RELATION_KINDS } from "../lib/types";
 import { STATUS_COLOR, fmtTime, kindLabel, relationKindLabel, statusLabel } from "../lib/format";
 import { MAX_CANVAS_RELATION, relationLabel } from "../lib/relations";
 import { t, useT } from "../lib/i18n";
-import { renderMarkdown } from "../lib/markdown";
+import MarkdownBody from "./MarkdownBody";
+import { appendAttachmentRef } from "../lib/attachments";
+import api from "../lib/api";
+import { ApiError } from "../lib/types";
 import type { FieldConflict } from "../lib/merge";
 
 /* ------------------------------- draft ---------------------------------- */
@@ -199,7 +202,7 @@ export default function SidePanel(p: SidePanelProps) {
           )}
         </div>
       </div>
-      {p.createDraft && <CreateDraftTab draft={p.createDraft} />}
+      {p.createDraft && <CreateDraftTab draft={p.createDraft} pid={p.project?.id ?? null} />}
       {/* C2: the wrapped detail stays mounted (hidden) so an in-progress edit
           survives the draft session; e2e targets the draft pathline by testid
           to dodge the hidden duplicate. */}
@@ -324,7 +327,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
       )}
 
       {editing ? (
-        <NodeFieldsForm d={d} set={set} />
+        <NodeFieldsForm d={d} set={set} pid={p.project?.id ?? null} />
       ) : (
         <ReadView n={n} />
       )}
@@ -380,12 +383,42 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
  *  (editing an existing node) and the canvas draft session (C2: creating a
  *  node). Purely presentational — validation, gating and save live with the
  *  caller. */
-export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draft>) => void }) {
+export function NodeFieldsForm({ d, set, pid }: { d: Draft; set: (patch: Partial<Draft>) => void; pid: string | null }) {
   const t = useT();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewMd, setPreviewMd] = useState(false);
   // D1: 「插入表格」的行列输入（简单 prompt 状态；确认后追加 Markdown 模板）
   const [tbl, setTbl] = useState<{ rows: number; cols: number } | null>(null);
+  // D3: 图片上传（插入按钮 + 粘贴）。上传即暂存（staged），随草稿保存时
+  // 由提交事务翻转 attached；取消草稿则留给 30 天 GC 兜底。
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [upBusy, setUpBusy] = useState(false);
+  const [upErr, setUpErr] = useState<string | null>(null);
+  const uploadFile = (file: File) => {
+    if (!pid || upBusy) return;
+    if (!/^image\//i.test(file.type)) {
+      setUpErr(t("att.upload.notimage"));
+      return;
+    }
+    setUpBusy(true);
+    setUpErr(null);
+    api
+      .uploadAttachment(pid, file)
+      .then((att) => {
+        set({ details_md: appendAttachmentRef(d.details_md, att.id, att.original_name ?? file.name) });
+      })
+      .catch((e: unknown) => {
+        setUpErr(e instanceof ApiError ? `${t("att.upload.failed")} ${e.message}` : t("att.upload.failed"));
+      })
+      .finally(() => setUpBusy(false));
+  };
+  const onPasteMd = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const img = Array.from(e.clipboardData?.files ?? []).find((f) => f.type.startsWith("image/"));
+    if (img) {
+      e.preventDefault();
+      uploadFile(img);
+    }
+  };
   return (
     <div className="editform">
       <div className="row" style={{ marginBottom: 8 }}>
@@ -447,17 +480,31 @@ export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draf
       {detailsOpen && (
         <>
           {previewMd ? (
-            <div
-              className="md-body"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(d.details_md) }}
-            />
+            <MarkdownBody md={d.details_md} />
           ) : (
+            <>
             <textarea
               value={d.details_md}
               maxLength={30000}
               onChange={(e) => set({ details_md: e.target.value })}
+              onPaste={onPasteMd}
+              data-testid="md-editor"
               style={{ width: "100%", minHeight: 140 }}
             />
+            {/* D3: 粘贴图片依赖 textarea 聚焦；隐藏 input 只吃按钮触发 */}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              hidden
+              data-testid="md-image-input"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadFile(f);
+                e.target.value = "";
+              }}
+            />
+            </>
           )}
           <button onClick={() => setPreviewMd(!previewMd)} style={{ marginTop: 6 }}>
             {previewMd ? t("edit.preview.back") : t("edit.preview.go")}
@@ -503,6 +550,22 @@ export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draf
               {t("edit.table.insert")}
             </button>
           ))}
+          {!previewMd && (
+            <button
+              data-testid="md-image-insert"
+              onClick={() => fileRef.current?.click()}
+              disabled={!pid || upBusy}
+              title={!pid ? t("att.upload.noproject") : undefined}
+              style={{ marginLeft: 6 }}
+            >
+              {upBusy ? t("att.uploading") : t("att.insert")}
+            </button>
+          )}
+          {upErr && (
+            <div className="hint err" data-testid="md-upload-err" style={{ marginTop: 4 }}>
+              {upErr}
+            </div>
+          )}
         </>
       )}
 
@@ -584,8 +647,10 @@ export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draf
  *  title/kind/status/short summary. */
 function CreateDraftTab({
   draft,
+  pid,
 }: {
   draft: NonNullable<SidePanelProps["createDraft"]>;
+  pid: string | null;
 }) {
   const t = useT();
   const d = draft.fields;
@@ -623,7 +688,7 @@ function CreateDraftTab({
           {t("detail.gate.hint", { status: statusLabel(d.status), items: missing.join(t("common.list.sep")) })}
         </div>
       )}
-      <NodeFieldsForm d={d} set={set} />
+      <NodeFieldsForm d={d} set={set} pid={pid} />
       <div className="savebar">
         <button className="primary" onClick={draft.onSave} disabled={blocked} data-testid="draft-save">
           {draft.busy ? t("modal.creating") : t("modal.create")}
@@ -727,10 +792,7 @@ function ReadView({ n }: { n: NodeFull }) {
             </button>
           </div>
           {detailsOpen && (
-            <div
-              className="md-body"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(n.details_md) }}
-            />
+            <MarkdownBody md={n.details_md} />
           )}
         </div>
       )}
