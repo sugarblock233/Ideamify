@@ -203,6 +203,21 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .hint.err { background: var(--err-bg); border-color: var(--err-edge); }
 .hint.ok { background: var(--ok-bg); border-color: var(--ok-edge); }
 
+/* A02/R02: per-field three-way conflict comparison. */
+.conflict-field {
+  border: 1px solid var(--err-edge); border-radius: 6px;
+  padding: 6px 8px; margin-top: 8px; background: var(--panel);
+}
+.conflict-name { font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+.conflict-col { margin-bottom: 4px; }
+.conflict-tag { font-size: 11px; color: var(--ink-dim); }
+.conflict-col pre {
+  margin: 2px 0 0; font-size: 12px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: inherit; max-height: 8em; overflow: auto;
+}
+.conflict-actions { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+
 .rel-item {
   border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
   margin: 6px 0; font-size: 12px;

@@ -18,6 +18,7 @@ import { NODE_KINDS, NODE_STATUSES, RELATION_KINDS } from "../lib/types";
 import { KIND_LABEL, RELATION_LABEL, STATUS_LABEL, fmtTime } from "../lib/format";
 import { MAX_CANVAS_RELATION, relationLabel } from "../lib/relations";
 import { renderMarkdown } from "../lib/markdown";
+import type { FieldConflict } from "../lib/merge";
 
 /* ------------------------------- draft ---------------------------------- */
 
@@ -51,6 +52,42 @@ export function draftOf(n: NodeFull): Draft {
   };
 }
 
+/** A02/R02: Chinese labels for the three-way conflict comparison. */
+export const DRAFT_FIELD_LABEL: Record<keyof Draft, string> = {
+  kind: "类型",
+  title: "标题",
+  summary: "摘要",
+  status: "状态",
+  rationale: "为什么做 · 试法",
+  finding: "直接观察",
+  decision: "当前解释与决定",
+  scope: "适用条件",
+  details_md: "长说明",
+  tags: "标签",
+  evidence: "证据引用",
+};
+
+/** One field both you and someone else changed, with all three versions so
+ *  the user can compare instead of being told "已保留你的值" after the fact. */
+export type DraftConflict = FieldConflict<Draft>;
+
+/** Human-readable rendering of any draft field for the comparison table. */
+export function formatDraftValue(field: keyof Draft, v: Draft[keyof Draft]): string {
+  if (field === "kind") return KIND_LABEL[v as NodeKind];
+  if (field === "status") return STATUS_LABEL[v as NodeStatus];
+  if (field === "tags") {
+    const t = v as string[];
+    return t.length ? t.join("、") : "（空）";
+  }
+  if (field === "evidence") {
+    const e = v as EvidenceItem[];
+    if (!e.length) return "（无证据）";
+    return e.map((x) => `${x.kind}｜${x.label || "(无标签)"}｜${x.value}`).join("\n");
+  }
+  const s = String(v ?? "");
+  return s.trim() ? s : "（空）";
+}
+
 export function diffDraft(base: Draft, cur: Draft): Partial<Draft> {
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(base) as (keyof Draft)[]) {
@@ -76,6 +113,10 @@ export interface SidePanelProps {
   /** A02: the project revision this draft was read at. */
   draftBaseRev: number | null;
   draftErr: string | null;
+  /** A02/R02: fields both sides changed; saving is blocked until each is
+   *  resolved so nothing is submitted as if it had been reviewed. */
+  conflicts: DraftConflict[];
+  onResolveConflictField: (field: keyof Draft, choice: "local" | "server" | "manual") => void;
   onDiscardDraft: () => void;
   onSave: () => void;
 
@@ -252,6 +293,9 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
           不会静默以你的旧版本覆盖他人修改。
         </div>
       )}
+      {p.conflicts.length > 0 && (
+        <ConflictResolver conflicts={p.conflicts} onResolve={p.onResolveConflictField} />
+      )}
       {p.draftErr && <div className="hint err">{p.draftErr}</div>}
 
       {missing.length > 0 && (
@@ -417,8 +461,14 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
             <button
               className="primary"
               onClick={p.onSave}
-              disabled={!p.dirty || !d.title.trim() || p.draftStale}
-              title={p.draftStale ? "草稿基于旧版本：先点「载入新版并重排草稿」" : undefined}
+              disabled={!p.dirty || !d.title.trim() || p.draftStale || p.conflicts.length > 0}
+              title={
+                p.conflicts.length > 0
+                  ? `还有 ${p.conflicts.length} 个冲突字段未处理：先在上方逐项选择`
+                  : p.draftStale
+                    ? "草稿基于旧版本：先点「载入新版并重排草稿」"
+                    : undefined
+              }
             >
               保存
             </button>
@@ -443,6 +493,51 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
           本节点已归档。恢复后相关 relations 才会重新渲染。
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------- conflict resolution (R02) ------------------------ */
+
+/** A02/R02: per-field three-way comparison. Shows what the field looked like
+ *  when you started editing (读取时), what you typed, and what the other actor
+ *  committed — then lets you pick. Until every row is resolved the save button
+ *  stays disabled, so an overlapping edit can never be submitted unreviewed. */
+function ConflictResolver({
+  conflicts,
+  onResolve,
+}: {
+  conflicts: DraftConflict[];
+  onResolve: (field: keyof Draft, choice: "local" | "server" | "manual") => void;
+}) {
+  return (
+    <div className="hint err conflict-box">
+      <div>
+        以下 {conflicts.length} 个字段你与他人同时修改，已保留你的值。请逐项对比后选择，
+        全部处理完才能保存——不会静默按任何一方覆盖。
+      </div>
+      {conflicts.map((c) => (
+        <div key={c.field} className="conflict-field">
+          <div className="conflict-name">{c.label}</div>
+          <div className="conflict-col">
+            <span className="conflict-tag">读取时（共同起点）</span>
+            <pre>{formatDraftValue(c.field, c.base)}</pre>
+          </div>
+          <div className="conflict-col">
+            <span className="conflict-tag">你的草稿</span>
+            <pre>{formatDraftValue(c.field, c.local)}</pre>
+          </div>
+          <div className="conflict-col">
+            <span className="conflict-tag">服务器（他人已提交）</span>
+            <pre>{formatDraftValue(c.field, c.server)}</pre>
+          </div>
+          <div className="conflict-actions">
+            <button onClick={() => onResolve(c.field, "local")}>保留我的</button>
+            <button onClick={() => onResolve(c.field, "server")}>采用服务器</button>
+            <button onClick={() => onResolve(c.field, "manual")}>我自己合并</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

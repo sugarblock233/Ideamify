@@ -8,6 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api, { uuidv4 } from "../lib/api";
 import { initialFolds } from "../lib/layout";
+import { threeWayMerge } from "../lib/merge";
 import {
   ApiError,
   type CommitItem,
@@ -24,7 +25,13 @@ import {
 import { STATUS_LABEL } from "../lib/format";
 import { replaceDeepLink } from "../lib/deeplink";
 import Canvas, { loadSavedView, saveView } from "./Canvas";
-import SidePanel, { type Draft, draftOf, diffDraft } from "./SidePanel";
+import SidePanel, {
+  DRAFT_FIELD_LABEL,
+  type Draft,
+  type DraftConflict,
+  draftOf,
+  diffDraft,
+} from "./SidePanel";
 import TopBar, { type TopBarSearch } from "./TopBar";
 import type { ProjectLite } from "../gate/TokenGate";
 
@@ -63,6 +70,9 @@ export default function Workspace({
    *  must use THIS baseline, never a later global revision. */
   const [draftBaseRev, setDraftBaseRev] = useState<number | null>(null);
   const [draftErr, setDraftErr] = useState<string | null>(null);
+  /** A02/R02: fields both you and someone else changed, with all three
+   *  versions. Non-empty blocks saving until every one is resolved. */
+  const [draftConflicts, setDraftConflicts] = useState<DraftConflict[]>([]);
   const [conflictRev, setConflictRev] = useState<number | null>(null);
 
   const [relations, setRelations] = useState<RelationItem[]>([]);
@@ -188,6 +198,27 @@ export default function Workspace({
     [pid],
   );
 
+  /** A02/R02: the single place every refresh path (post-commit sync, 载入更新,
+   *  重排草稿) applies a fresh server snapshot to the live draft. Routing all
+   *  three through here is what stops one of them from silently dropping
+   *  conflicts and advancing the baseline, as post-commit sync used to. */
+  const applyServerSnapshot = useCallback((nf: NodeFull): DraftConflict[] => {
+    const server = draftOf(nf);
+    const d = draftRef.current;
+    const base = draftBaseRef.current;
+    if (d && base && dirtyRef.current) {
+      const { merged, conflicts } = threeWayMerge(base, d, server, (f) => DRAFT_FIELD_LABEL[f]);
+      setDraft(merged);
+      setDraftBase(server);
+      setDraftConflicts(conflicts);
+      return conflicts;
+    }
+    setDraft(server);
+    setDraftBase(server);
+    setDraftConflicts([]);
+    return [];
+  }, []);
+
   const syncAll = useCallback(async () => {
     const g = await api.graph(pid);
     setGraph(g.nodes);
@@ -199,40 +230,40 @@ export default function Workspace({
         const nf = await api.node(pid, sel);
         setNode(nf);
         setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
-        // A02: a dirty draft is rebased (silently) onto the fresh snapshot —
-        // user-edited fields keep the user's value; a clean draft resets to
-        // the server's, and the baseline revision is re-pinned either way.
-        const d = draftRef.current;
-        const base = draftBaseRef.current;
-        if (d && base && dirtyRef.current) {
-          const server = draftOf(nf);
-          const { merged } = threeWayMerge(base, d, server);
-          setDraft(merged);
-          setDraftBase(server);
-        } else {
-          const d0 = draftOf(nf);
-          setDraft(d0);
-          setDraftBase(d0);
-        }
+        // A02/R02: a dirty draft is rebased onto the fresh snapshot — untouched
+        // fields take the server's value, your edits stay, and same-field
+        // conflicts are surfaced here exactly like on an explicit refresh
+        // (this path used to discard them and advance the baseline anyway).
+        const conflicts = applyServerSnapshot(nf);
         setDraftBaseRev(nf.project_revision);
+        if (conflicts.length) {
+          ironToast("刷新后发现同字段冲突，请在详情面板逐项核对", "err");
+        }
       } catch {
         setNode(null);
         setDraft(null);
         setDraftBase(null);
         setDraftBaseRev(null);
+        setDraftConflicts([]);
       }
       await loadNodeRelations(sel, incArchRef.current, null, false);
       loadNodeCommits(sel);
     }
-  }, [pid, loadNodeRelations, loadNodeCommits]);
+  }, [pid, loadNodeRelations, loadNodeCommits, applyServerSnapshot, ironToast]);
 
   /* -------------------------------- selection ----------------------------- */
 
+  /** A02/R01: the ONE dirty-draft guard every real leave path goes through
+   *  (exit, new project, switch project, switch node, close panel). Cancel
+   *  returns false and the caller must leave the draft and the view untouched. */
+  function confirmLeaveDraft(what: string): boolean {
+    if (!dirty) return true;
+    return window.confirm(`有未保存的草稿。${what}草稿将丢失，确定继续？`);
+  }
+
   function guardLeave(targetId?: string | null): boolean {
-    if (dirty && (targetId ?? null) !== selectedId) {
-      return window.confirm("有未保存的草稿。离开当前节点草稿将丢失，确定继续？");
-    }
-    return true;
+    if ((targetId ?? null) === selectedId) return true;
+    return confirmLeaveDraft("离开当前节点，");
   }
 
   const selectNode = useCallback(
@@ -253,6 +284,7 @@ export default function Workspace({
       setDraftBase(null);
       setDraftBaseRev(null);
       setDraftErr(null);
+      setDraftConflicts([]);
       setRelations([]);
       setCommits([]);
       setCommitDetail(null);
@@ -471,22 +503,10 @@ export default function Workspace({
           const nf = await api.node(pid, selectedRef.current);
           setNode(nf);
           setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
-          // A02/T22: an explicit "载入更新" rebases the live draft onto the new
-          // snapshot — user-edited fields keep the user's value; overlapping
-          // edits are surfaced, never applied silently. A clean draft resets.
-          const d = draftRef.current;
-          const base = draftBaseRef.current;
-          const server = draftOf(nf);
-          if (d && base && dirtyRef.current) {
-            const { merged, conflicts } = threeWayMerge(base, d, server);
-            setDraft(merged);
-            setDraftBase(server);
-            if (conflicts.length)
-              setDraftErr(`以下字段你与他人同时修改，已保留你的值，请核对后保存：${conflicts.join("、")}`);
-          } else {
-            setDraft(server);
-            setDraftBase(server);
-          }
+          // A02/T22/R02: an explicit "载入更新" rebases the live draft onto the
+          // new snapshot — user-edited fields keep the user's value; overlapping
+          // edits are surfaced for comparison, never applied silently.
+          applyServerSnapshot(nf);
           setDraftBaseRev(nf.project_revision);
         } catch {
           /* node may have been archived away; next selection will 404-warn */
@@ -510,19 +530,12 @@ async function rebaseDraft() {
     if (!sel || !d || !base) return;
     try {
       const nf = await api.node(pid, sel);
-      const server = draftOf(nf);
-      const { merged, conflicts } = threeWayMerge(base, d, server);
       setNode(nf);
-      setDraft(merged);
-      setDraftBase(server);
+      applyServerSnapshot(nf);
       setDraftBaseRev(nf.project_revision);
       setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
       setConflictRev(null);
-      setDraftErr(
-        conflicts.length
-          ? `以下字段你与他人同时修改，已保留你的值，请核对后再保存：${conflicts.join("、")}`
-          : null,
-      );
+      setDraftErr(null);
       ironToast("已载入新版并重排草稿", "ok");
     } catch (e) {
       ironToast(e instanceof ApiError ? e.message : "重载失败", "err");
@@ -580,6 +593,15 @@ async function rebaseDraft() {
 
   const saveDraft = useCallback(async () => {
     if (!node || !draft || !draftBase || !dirty) return;
+    // R02: an unresolved same-field conflict must never be submitted as if the
+    // user had reviewed it.
+    if (draftConflicts.length) {
+      ironToast(
+        `还有 ${draftConflicts.length} 个字段与他人的修改冲突未处理：请在冲突区逐项选择后再保存`,
+        "err",
+      );
+      return;
+    }
     if (draftStale) {
       ironToast(
         `草稿基于 v${draftBaseRev}，服务器已是 v${project?.revision}：先点“载入新版并重排草稿”再保存`,
@@ -601,12 +623,28 @@ async function rebaseDraft() {
     }
     // on success syncAll() already re-pins the draft base (or rebases it)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node, draft, draftBase, dirty, draftBaseRev, draftStale, project, pid, ironToast]);
+  }, [node, draft, draftBase, dirty, draftBaseRev, draftStale, project, pid, ironToast, draftConflicts]);
 
   const discardDraft = useCallback(() => {
     if (draftBase) setDraft(draftBase);
     setDraftErr(null);
+    setDraftConflicts([]);
   }, [draftBase]);
+
+  /** R02: record the user's choice for one conflicting field. "manual" keeps
+   *  whatever is in the editor and just marks the field reviewed. */
+  const resolveConflict = useCallback(
+    (field: keyof Draft, choice: "local" | "server" | "manual") => {
+      const hit = draftConflicts.find((c) => c.field === field);
+      if (!hit) return;
+      if (choice !== "manual") {
+        const v = choice === "local" ? hit.local : hit.server;
+        setDraft((d) => (d ? ({ ...d, [field]: v } as Draft) : d));
+      }
+      setDraftConflicts((prev) => prev.filter((c) => c.field !== field));
+    },
+    [draftConflicts],
+  );
 
   /* ------------------------------ node actions ----------------------------- */
 
@@ -841,10 +879,15 @@ async function rebaseDraft() {
         projects={projects}
         currentProjectId={pid}
         onSwitchProject={(pid2) => {
-          if (dirty && !window.confirm("有未保存草稿，切换项目将丢弃。继续？")) return;
+          if (!confirmLeaveDraft("切换项目，")) return;
           onChangeProject(pid2);
         }}
-        onCreateProject={() => setModalProject("create")}
+        onCreateProject={() => {
+          // Creating a project navigates away (onChangeProject below), so the
+          // guard belongs here — before the user fills in a form they'd lose.
+          if (!confirmLeaveDraft("新建项目会离开当前项目，")) return;
+          setModalProject("create");
+        }}
         onEditProject={() => setModalProject("edit")}
         onNewRoot={() => setCreateNodeParent(null)}
         onFit={() => setFitSignal((n) => n + 1)}
@@ -871,7 +914,10 @@ async function rebaseDraft() {
         }}
         onExport={() => void exportProject()}
         onShowAiAccess={() => setAiAccessOpen(true)}
-        onExit={onExit}
+        onExit={() => {
+          if (!confirmLeaveDraft("退出当前项目，")) return;
+          onExit();
+        }}
         search={searchProp}
         recent={{ open: recentOpen, commits: recentCommits, toggle: () => void openRecent(), onPick: pickRecent }}
       />
@@ -918,6 +964,8 @@ async function rebaseDraft() {
           draftStale={draftStale}
           draftBaseRev={draftBaseRev}
           draftErr={draftErr}
+          conflicts={draftConflicts}
+          onResolveConflictField={resolveConflict}
           onDiscardDraft={discardDraft}
           onSave={() => void saveDraft()}
           conflictRevision={conflictRev}
@@ -1035,24 +1083,6 @@ async function rebaseDraft() {
 }
 
 /* helpers */
-
-/** Three-way merge used by rebaseDraft and post-commit sync (A02).
- *  User-edited fields keep the user's value; untouched fields take the
- *  server's new value; overlapping edits are reported back for display. */
-function threeWayMerge(base: Draft, user: Draft, server: Draft): { merged: Draft; conflicts: string[] } {
-  const conflicts: string[] = [];
-  const merged = { ...server } as Draft;
-  for (const k of Object.keys(server) as (keyof Draft)[]) {
-    const oldV = JSON.stringify(base[k]);
-    const userV = JSON.stringify(user[k]);
-    const srvV = JSON.stringify(server[k]);
-    if (userV !== oldV) {
-      (merged as Partial<Record<keyof Draft, unknown>>)[k] = user[k];
-      if (srvV !== oldV) conflicts.push(k);
-    }
-  }
-  return { merged, conflicts };
-}
 
 function emptyMarks() {
   return {
