@@ -399,4 +399,10 @@ export const en: Record<keyof typeof zh, string> = {
   "node.badge.updates": "{n} updates in branch",
   "node.fold.expand.title": "Expand branch ({n} direct children hidden)",
   "node.fold.collapse.title": "Collapse branch",
+
+  "a5.collapse.title": "Collapse side panel (width and state are remembered)",
+  "a5.expand.title": "Expand side panel",
+  "a5.handle.label": "Resize side panel (← wider, → narrower)",
+  "a5.locate.chip": "Locate current node",
+  "a5.rail.dirty.title": "Panel is collapsed, but you have an unsaved draft",
 };

@@ -33,6 +33,7 @@ import SidePanel, {
   draftOf,
   diffDraft,
 } from "./SidePanel";
+import ResizablePanel from "./ResizablePanel";
 import TopBar, { type TopBarSearch } from "./TopBar";
 import type { ProjectLite } from "../gate/TokenGate";
 
@@ -1017,7 +1018,12 @@ async function rebaseDraft() {
           {toast && <div className={`toast ${toast.kind === "err" ? "err" : "ok"}`}>{toast.msg}</div>}
         </div>
 
-        <SidePanel
+        <ResizablePanel
+          dirty={dirty}
+          selectedId={selectedId}
+          onLocate={(nid) => setPendingLocate({ nodeId: nid })}
+        >
+          <SidePanel
           project={project}
           node={node}
           loading={nodeLoading}
@@ -1093,6 +1099,7 @@ async function rebaseDraft() {
             },
           }}
         />
+        </ResizablePanel>
       </div>
 
       {createNodeParent !== undefined && (

@@ -398,6 +398,13 @@ export const zh = {
   "node.badge.updates": "分支内有更新 {n}",
   "node.fold.expand.title": "展开分支（隐藏 {n} 个直接子节点）",
   "node.fold.collapse.title": "折叠分支",
+
+  // ---- ResizablePanel（A5） -------------------------------------------------------------
+  "a5.collapse.title": "收起侧栏（宽度与收起状态会被记住）",
+  "a5.expand.title": "展开侧栏",
+  "a5.handle.label": "调整侧栏宽度（←加宽，→收窄，回车/拖动同样有效）",
+  "a5.locate.chip": "定位当前节点",
+  "a5.rail.dirty.title": "侧栏已收起，但有未保存的草稿",
 } as const;
 
 export type DictKey = keyof typeof zh;

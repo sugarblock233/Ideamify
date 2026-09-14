@@ -187,6 +187,40 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 }
 
 /* ---------- side panel ---------- */
+/* A5: resizable/collapsible zone. The .side rules below stay as fallbacks; the
+   ResizablePanel component drives width inline. */
+.side-zone { position: relative; display: flex; flex: 0 0 auto; height: 100%; }
+.side-hnd {
+  flex: 0 0 5px; cursor: col-resize; background: transparent; touch-action: none;
+  border-right: 1px solid transparent;
+}
+.side-hnd:hover, .side-hnd:focus-visible { background: var(--sel); opacity: .5; outline: none; }
+.side-zone.drawer .side-hnd { display: none; }
+/* 抽屉面板 absolute right:0 会盖住 rail；把 rail 抬到面板之上，
+   收起开关在抽屉态仍可点。 */
+.side-zone.drawer .rail { position: relative; z-index: 45; }
+.side-zone.drawer .side {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 40;
+  box-shadow: -10px 0 28px rgba(20,30,50,.18);
+}
+.side-zone .side.collapsed { border-left: none; }
+.rail { display: flex; flex-direction: column; align-items: center; padding: 8px 1px; gap: 6px; }
+.rail-toggle {
+  position: relative; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--ink-dim); padding: 2px 3px; font-size: 11px;
+}
+.rail-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.rail-toggle .dot {
+  position: absolute; top: -3px; right: -3px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--st-red);
+}
+.locate-chip {
+  position: absolute; bottom: 18px; z-index: 30;
+  background: var(--panel); border: 1px solid var(--accent); color: var(--accent);
+  border-radius: 16px; padding: 4px 12px; font-size: 12px;
+  box-shadow: 0 2px 8px rgba(20,30,50,.15);
+}
+.locate-chip:hover { background: var(--accent); color: #fff; }
 .side .head { padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
 .side .head h2 { margin: 0 0 4px; font-size: 16px; line-height: 1.35; }
 .side .body { padding: 10px 14px 20px; flex: 1; }
@@ -387,6 +421,3 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .diff-row .v { white-space: pre-wrap; }
 
 .conn { font-size: 12px; color: var(--ink-dim); }
-@media (max-width: 900px) {
-  .side { width: 320px; min-width: 260px; }
-}
