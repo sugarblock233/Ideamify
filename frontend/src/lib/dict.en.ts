@@ -416,4 +416,6 @@ export const en: Record<keyof typeof zh, string> = {
   "a6.expand.subtree.title": "Clear all folds inside the selected node's subtree (folds outside stay)",
   "a6.restore": "Restore last",
   "a6.restore.title": "Return to the fold state before the last batch tool (card-level manual folds excluded)",
+
+  "a7.search.title": "Search nodes",
 };

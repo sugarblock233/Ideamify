@@ -80,10 +80,21 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .dotmenu.open { border-color: var(--sel); color: var(--sel); }
 .pop-item.sub { padding-left: 22px; font-size: 12px; }
 .topbar .conn {
-  flex: 1 1 auto; min-width: 0; text-align: right;
+  flex: 1 1 auto;
+  /* A7: floor the ellipsis so overflow becomes detectable before the row
+     silently empties — tier steps down only once the row truly cannot fit. */
+  min-width: 140px;
+  text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   padding-right: 4px;
 }
+/* A7: adaptive top bar tiers, measured on the element (TopBar RO), not a
+   window media query. more hides refresh/connection/exit (they live in the
+   ⋯ menu); icon additionally collapses search and shortens the project
+   select. */
+.topbar.tier-icon .project-sel { max-width: 128px; min-width: 80px; }
+.icon-search-btn { padding: 4px 8px; font-size: 13px; }
+.topbar-conn-item { font-size: 12px; color: var(--ink-dim); }
 
 .workspace { display: flex; flex: 1; min-height: 0; }
 .canvas-wrap { position: relative; flex: 1; min-width: 0; }
@@ -240,10 +251,12 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .side .pathline { font-size: 12px; color: var(--ink-dim); margin-bottom: 6px; word-break: break-all; }
 .side .pathline b { color: var(--ink); font-weight: 600; }
 
-.tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); }
+/* A7: narrow panels scroll the tab row sideways — never shrink the font. */
+.tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
 .tabs button {
   border: none; border-bottom: 2px solid transparent; border-radius: 0;
   background: none; padding: 6px 10px; color: var(--ink-dim);
+  flex: none; white-space: nowrap;
 }
 .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 

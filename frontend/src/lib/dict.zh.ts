@@ -417,6 +417,9 @@ export const zh = {
   "a6.expand.subtree.title": "清除选中节点子树内的全部折叠（不含子树外的折叠）",
   "a6.restore": "恢复上次",
   "a6.restore.title": "回到上一批工具执行前的折叠状态（卡片上的手动折叠不参与）",
+
+  // ---- TopBar 自适应三档（A7，full → more → icon） ------------------------------------
+  "a7.search.title": "搜索节点",
 } as const;
 
 export type DictKey = keyof typeof zh;
