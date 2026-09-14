@@ -1,12 +1,15 @@
-"""Pytest entry for the 61-check ASGI smoke suite (tests/api_smoke.py).
+"""Pytest entry for the ASGI smoke suite (tests/api_smoke.py).
 
 Environment is configured here **before** the app is first imported, so the
 SQLite engine binds to a per-test temp database. The smoke script prints one
-PASS/FAIL line per check and exits non-zero on any failure.
+PASS/FAIL line per check and a final line "<passed>/<total> passed" (and exits
+non-zero on any failure). New checks added to api_smoke.py need no change to
+this wrapper: we parse that final line and assert zero failures.
 """
 
 import contextlib
 import io
+import re
 import runpy
 from pathlib import Path
 
@@ -32,6 +35,10 @@ def test_api_smoke(tmp_path, monkeypatch):
             rc = int(e.code or 0)
     out = buf.getvalue()
 
-    assert rc == 0, out
-    assert "FAIL" not in out, out
-    assert "61/61 passed" in out, out
+    m = re.search(r"^(\d+)/(\d+) passed$", out, flags=re.MULTILINE)
+    assert m, f"smoke output缺少通过计数，尾部: …{out[-2000:]}"
+    passed, total = int(m.group(1)), int(m.group(2))
+    assert passed > 0, "检查数为 0：" + out[:2000]
+    assert "FAIL " not in out, out
+    assert passed == total, out
+    assert rc == 0, f"smoke exit code {rc}\n{out}"

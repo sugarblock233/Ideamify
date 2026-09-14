@@ -5,8 +5,17 @@ after_id three-state), revision conflict, idempotent replay, dry-run,
 confirmed-status integrity (T10), cycles, archive/restore, relations, search,
 commits history, export, context budget, same-audit-path for AI actor,
 concurrent writers, oversized body, protected OpenAPI.
+
+A04 adds: final-response budget discipline (meta counted), consistent
+truncated/omitted_counts, q-first priority, executable continuations,
+min_chars_needed on CONTEXT_BUDGET_TOO_SMALL.
+B04 adds: node-history pagination (limit/cursor/before + next_before),
+move-history before/after.parent_id exposure, search & project pagination.
+
+The suite is append-friendly: new checks just add `check(...)` calls; the
+wrapper (test_api.py) reads the final "P/N passed" line.
 """
-import json, threading, sys, uuid
+import json, re, threading, sys, uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -277,6 +286,286 @@ check("context over-budget required-skeleton -> 422 CONTEXT_BUDGET_TOO_SMALL",
       r.status_code == 422 and r.json()["error"]["code"] == "CONTEXT_BUDGET_TOO_SMALL", r.text[:200])
 r = c.get(f"/api/v1/projects/{p2}/context", params={"focus_node_id": n2, "max_chars": 6000})
 check("context with headroom fits skeleton (200)", r.status_code == 200 and r.json()["focus"]["id"] == n2, r.text[:200])
+
+# ---------------- A04: context budget / truncation / priority -------------
+# Dedicated scratch project so these checks do not disturb the main one.
+pctx = c.post("/api/v1/projects", json={"request_id": U(), "name": "预算测试项目",
+              "objective": "验证 context 预算与截断信号（合成数据）"}).json()["id"]
+
+def commit_to(pid_, ops, exp, rid=None, client_=None, summary=None, label="smoke"):
+    cc = client_ or c
+    return cc.post(f"/api/v1/projects/{pid_}/commits",
+                   json={"request_id": rid or U(), "expected_revision": exp,
+                         "summary": summary or "冒烟提交", "client_label": label,
+                         "operations": ops})
+
+LONG_SUMMARY = "长摘要" * 70  # 280 chars: forces field-level truncation rules to be relevant
+
+# Seed topology:
+#   root (top, question)      -- a (idea, in_progress) -- foc (attempt, promising, long fields)
+#               |                   |-- p1..p3 (same-branch failures / open question)
+#               |                   |-- ch1..ch6 (foc's open children)
+#   side (top, idea, unexplored) -- o1..o4 (long open items)
+#   g1 (under root, supported finding), mnode (top, unique keyword "1099" in title)
+#   nc1/nd1/nr1/nr2 (top) related to foc: contradicts / depends_on / related / related
+root, side = U(), U()
+a, foc = U(), U()
+fa1, fa2, fa3 = U(), U(), U()
+ch_ids = [U() for _ in range(6)]
+o_ids = [U() for _ in range(4)]
+g1, mnode = U(), U()
+nc1, nd1, nr1, nr2 = U(), U(), U(), U()
+
+r = commit_to(pctx, [
+    {"op": "node.create", "id": root, "kind": "question", "title": "主干问题", "summary": "主线探索"},
+    {"op": "node.create", "id": side, "kind": "idea", "title": "无关支线", "summary": "另一条路线"},
+], 0)
+check("A04 seed: rev1 ready", r.status_code == 200, r.text[:200])
+
+r = commit_to(pctx, [
+    {"op": "node.create", "id": a, "parent_id": root, "kind": "idea", "title": "一级假设",
+     "summary": "待验证的核心假设", "status": "in_progress"},
+    {"op": "node.create", "id": foc, "parent_id": a, "kind": "attempt", "title": "焦点实验",
+     "summary": LONG_SUMMARY, "status": "promising", "scope": "限定温控与浓度窗口" * 10,
+     "finding": "出现可重复信号" * 12, "decision": "继续探索并补充批次" * 8, "tags": ["焦点"]},
+    {"op": "node.create", "id": fa1, "parent_id": a, "kind": "attempt", "title": "失败尝试1",
+     "status": "not_supported", "scope": "批次甲参数" * 8, "finding": "未达停止条件" * 8,
+     "decision": "放弃该路径" * 8,
+     "evidence": [{"kind": "inline", "label": "合成数据", "value": "活性低于阈值"}]},
+    {"op": "node.create", "id": fa2, "parent_id": a, "kind": "attempt", "title": "失败尝试2",
+     "status": "not_supported", "scope": "批次乙参数" * 8, "finding": "重复不成立" * 8,
+     "decision": "终止该方向" * 8,
+     "evidence": [{"kind": "inline", "label": "合成数据", "value": "重复均复现失败"}]},
+    {"op": "node.create", "id": fa3, "parent_id": a, "kind": "question", "title": "未决问题3",
+     "status": "inconclusive", "summary": "证据不足" * 20},
+], 1, summary="焦点与先前失败")
+check("A04 seed: rev2 ready", r.status_code == 200, r.text[:200])
+
+r = commit_to(pctx, [
+    *[{"op": "node.create", "id": ch, "parent_id": foc, "kind": "idea",
+       "title": f"焦点开放子问题{i}", "summary": "子问题描述" * 8,
+       "status": "in_progress" if i % 2 else "unexplored"}
+      for i, ch in enumerate(ch_ids, 1)],
+    *[{"op": "node.create", "id": o, "parent_id": side, "kind": "idea",
+       "title": f"支线开放节点{i}", "summary": "支线开放事项" * 24, "status": "in_progress"}
+      for i, o in enumerate(o_ids, 1)],
+    {"op": "node.create", "id": g1, "parent_id": root, "kind": "finding", "title": "支持性发现",
+     "status": "supported", "scope": "当前范围内成立" * 8, "finding": "显著且可重复" * 8,
+     "decision": "纳入后续验证" * 8,
+     "evidence": [{"kind": "inline", "label": "合成数据", "value": "n=12，差异显著"}]},
+    {"op": "node.create", "id": mnode, "kind": "finding", "title": "唯一命中 1099 记录",
+     "status": "inconclusive", "summary": "关于 1099 的独立记录"},
+], 2, summary="开放节点与发现")
+check("A04 seed: rev3 ready", r.status_code == 200, r.text[:200])
+
+r = commit_to(pctx, [
+    {"op": "node.create", "id": nc1, "kind": "attempt", "title": "反证记录",
+     "status": "not_supported", "scope": "交叉验证范围" * 8, "finding": "不支持焦点结论" * 8,
+     "decision": "需复核条件" * 8,
+     "evidence": [{"kind": "inline", "label": "合成数据", "value": "交叉验证失效"}]},
+    {"op": "node.create", "id": nd1, "kind": "idea", "title": "前置依赖",
+     "summary": "焦点依赖其产出" * 12},
+    {"op": "node.create", "id": nr1, "kind": "idea", "title": "同主题记录A",
+     "summary": "相关背景" * 12},
+    {"op": "node.create", "id": nr2, "kind": "idea", "title": "同主题记录B",
+     "summary": "相关背景二" * 12},
+    {"op": "relation.create", "id": U(), "source_id": foc, "target_id": nc1,
+     "kind": "contradicts", "reason": "焦点结论在该条件下不成立"},
+    {"op": "relation.create", "id": U(), "source_id": foc, "target_id": nd1,
+     "kind": "depends_on", "reason": "依赖前置结果"},
+    {"op": "relation.create", "id": U(), "source_id": nr1, "target_id": foc,
+     "kind": "related", "reason": "同主题"},
+    {"op": "relation.create", "id": U(), "source_id": foc, "target_id": nr2,
+     "kind": "related", "reason": "同主题2"},
+], 3, summary="焦点关联")
+check("A04 seed: rev4 (relations) ready", r.status_code == 200, r.text[:300])
+
+def compact_len(d):
+    return len(json.dumps(d, ensure_ascii=False, separators=(",", ":")))
+
+# (a) final response, meta included, respects the budget
+r = c.get(f"/api/v1/projects/{pctx}/context", params={"focus_node_id": foc, "max_chars": 4000})
+j = r.json()
+cl = compact_len(j)
+check("A04-a: focus@4000 final size within budget, meta non-empty",
+      r.status_code == 200 and cl <= 4000
+      and (j.get("omitted_counts") or j.get("continuations") or j.get("warnings")),
+      f"compact={cl} status={r.status_code}")
+# (b) any whole-item omission reports truncated=true
+check("A04-b: omission at 4000 -> truncated=true with counted omissions",
+      r.status_code == 200 and bool(j["omitted_counts"]) and j["truncated"] is True,
+      f"omitted={j.get('omitted_counts')} truncated={j.get('truncated')}")
+# data-not-instructions contract
+check("A04: response carries data_notice", isinstance(j.get("data_notice"), str)
+      and "指令" in j["data_notice"], str(j.get("data_notice"))[:80])
+
+# (c) unique q-match is returned at a tight budget while general overview is omitted
+r2 = c.get(f"/api/v1/projects/{pctx}/context", params={"q": "1099", "max_chars": 4000})
+j2 = r2.json()
+cl2 = compact_len(j2)
+check("A04-c: unique q-match kept at 4000 while general groups omitted",
+      r2.status_code == 200 and cl2 <= 4000
+      and mnode in [x["id"] for x in j2["matched"]]
+      and any(j2["omitted_counts"].get(k, 0) > 0
+              for k in ("open_nodes", "routes", "recent_findings", "recent_changes"))
+      and j2["truncated"] is True,
+      f"compact={cl2} matched={len(j2['matched'])} omitted={j2.get('omitted_counts')}")
+# and still first when focus is also given (matches outrank focus content)
+r3 = c.get(f"/api/v1/projects/{pctx}/context", params={"focus_node_id": foc, "q": "1099", "max_chars": 4000})
+j3 = r3.json()
+check("A04-c: q-match first even with focus set",
+      r3.status_code == 200 and compact_len(j3) <= 4000
+      and mnode in [x["id"] for x in j3["matched"]],
+      f"matched={[x['id'] for x in j3.get('matched', [])][:3]} status={r3.status_code}")
+# no q, no focus, bigger budget: whole-response fit still holds
+r4 = c.get(f"/api/v1/projects/{pctx}/context", params={"max_chars": 12000})
+j4 = r4.json()
+check("A04: overview@12000 within budget",
+      r4.status_code == 200 and compact_len(j4) <= 12000,
+      f"compact={compact_len(j4)}")
+# no-hit q: explicit "not returned != never tried" warning
+r5 = c.get(f"/api/v1/projects/{pctx}/context", params={"q": "必然不存在的词", "max_chars": 4000})
+j5 = r5.json()
+check("A04: zero-hit q -> warning, still within budget",
+      r5.status_code == 200 and compact_len(j5) <= 4000 and any("从未尝试" in w for w in j5["warnings"]),
+      str(j5.get("warnings")))
+
+# (d) every emitted continuation is an executable GET the endpoint accepts
+ok_d, extra_d, ran_d = True, "", 0
+for resp in (j2, j):
+    if "continuations" not in resp:
+        ok_d, extra_d = False, f"context 响应缺少 meta 字段: {str(resp)[:120]}"
+        break
+    for cont in resp["continuations"]:
+        mm = re.match(r"^GET (\S+)$", cont)
+        if not mm:
+            ok_d = False; extra_d = f"not a bare GET url: {cont}"
+            break
+        rr = c.get(mm.group(1))
+        ran_d += 1
+        if rr.status_code != 200:
+            ok_d = False; extra_d = f"{cont} -> {rr.status_code} {rr.text[:120]}"
+        if not ok_d:
+            break
+    if not ok_d:
+        break
+check("A04-d: continuations are executable queries (all -> 200)",
+      ran_d > 0 and ok_d, extra_d or f"ran {ran_d} continuations")
+
+# CONTEXT_BUDGET_TOO_SMALL must report the observed minimum (p2: giant objective)
+r6 = c.get(f"/api/v1/projects/{p2}/context", params={"focus_node_id": n2, "max_chars": 4000})
+d6 = r6.json().get("error", {}).get("details", {})
+check("A04: too-small skeleton -> 422 with observed min_chars_needed",
+      r6.status_code == 422 and r6.json()["error"]["code"] == "CONTEXT_BUDGET_TOO_SMALL"
+      and isinstance(d6.get("min_chars_needed"), int) and d6["min_chars_needed"] > 4000
+      and d6.get("requested_chars") == 4000,
+      str(d6)[:200])
+
+# ---------------- B04: history pagination + move before/after -----------------
+phist = c.post("/api/v1/projects", json={"request_id": U(), "name": "历史分页项目",
+             "objective": "超过 20 条节点历史（合成数据）"}).json()["id"]
+h0, h1 = U(), U()
+r = commit_to(phist, [
+    {"op": "node.create", "id": h0, "kind": "idea", "title": "历史载体", "summary": "翻页测试载体"},
+    {"op": "node.create", "id": h1, "kind": "idea", "title": "可移动节点", "summary": "将被移动"},
+], 0, summary="建节点")
+check("B04 seed: rev1", r.status_code == 200, r.text[:200])
+r = commit_to(phist, [{"op": "node.move", "id": h1, "parent_id": h0}], 1, summary="移动h1")
+check("B04 seed: move rev2", r.status_code == 200, r.text[:200])
+ok_hist = True; hist_err = ""
+for i in range(21):
+    r = commit_to(phist, [{"op": "node.update", "id": h0, "fields": {"summary": f"历史更新 {i}"}}],
+                  2 + i, summary=f"历史更新{i}")
+    if r.status_code != 200:
+        ok_hist = False; hist_err = r.text[:200]; break
+check("B04 seed: 21 updates on one node (22 commits total)", ok_hist, hist_err)
+th_ids = [U() for _ in range(12)]
+r = commit_to(phist, [
+    {"op": "node.create", "id": x, "kind": "idea", "title": f"吞吐节点{i}", "summary": "吞吐相关"}
+    for i, x in enumerate(th_ids)], 23, summary="吞吐批次")
+check("B04 seed: 12 same-keyword nodes", r.status_code == 200, r.text[:200])
+
+# node history: > limit commits, newest first, pages complete without overlap
+r = c.get(f"/api/v1/projects/{phist}/commits", params={"node_id": h0, "limit": 10})
+j = r.json()
+revs1 = [i["revision"] for i in j["items"]]
+check("B04-h1: node history page1 (10 newest, paging fields present)",
+      r.status_code == 200 and len(j["items"]) == 10 and j["has_more"] is True
+      and bool(j.get("next_cursor")) and bool(j.get("next_before")),
+      r.text[:200] if r.status_code != 200 else str(revs1))
+check("B04-h1: page1 strictly newest-first",
+      all(revs1[k] > revs1[k + 1] for k in range(len(revs1) - 1)), str(revs1))
+r2 = c.get(f"/api/v1/projects/{phist}/commits", params={"node_id": h0, "limit": 10,
+                                                        "cursor": j["next_cursor"]})
+j2 = r2.json()
+revs2 = [i["revision"] for i in j2["items"]]
+check("B04-h2: page2 via next_cursor (10 items, no overlap, can continue)",
+      r2.status_code == 200 and len(j2["items"]) == 10 and j2["has_more"] is True
+      and not set(revs1) & set(revs2) and bool(j2.get("next_cursor")),
+      str(revs2)[:120] if r2.status_code == 200 else r2.text[:200])
+r3b = c.get(f"/api/v1/projects/{phist}/commits", params={"node_id": h0, "limit": 10,
+                                                         "cursor": j2["next_cursor"]})
+j3b = r3b.json()
+check("B04-h3: last page holds the create (rev 1), paging closes cleanly",
+      len(j3b["items"]) == 2 and j3b["has_more"] is False and j3b["next_cursor"] is None
+      and j3b["next_before"] is None and [i["revision"] for i in j3b["items"]][-1] == 1,
+      str([i["revision"] for i in j3b.get("items", [])]))
+# ?before=<commit id> == next window (alternative to cursor)
+r4b = c.get(f"/api/v1/projects/{phist}/commits", params={"node_id": h0, "limit": 10,
+                                                         "before": j["items"][-1]["id"]})
+j4b = r4b.json()
+check("B04-h4: ?before=<last commit id> returns the next (older) window",
+      r4b.status_code == 200 and [i["revision"] for i in j4b["items"]] == revs2,
+      str([i["revision"] for i in j4b.get("items", [])])[:120] if r4b.status_code == 200 else r4b.text[:200])
+# default (no params) keeps today's shape and returns everything when <= limit
+r5b = c.get(f"/api/v1/projects/{phist}/commits")
+j5b = r5b.json()
+item0 = (j5b.get("items") or [{}])[0]
+check("B04-h5: default call unchanged shape, full list when <= default limit",
+      r5b.status_code == 200 and len(j5b["items"]) == 24 and j5b["has_more"] is False
+      and j5b.get("next_before") is None
+      and all(k in item0 for k in ("id", "revision", "base_revision", "request_id",
+                                   "actor", "client_label", "summary", "created_at", "node_ids")),
+      r5b.text[:200] if r5b.status_code != 200 else str(list(item0)))
+# move history must expose before/after with parent_id + order_index (stored shape)
+mov = next((i for i in j5b["items"] if i["revision"] == 2), None)
+md = c.get(f"/api/v1/projects/{phist}/commits/{mov['id']}").json() if mov else {}
+mv = next((ch for ch in md.get("changes", []) if ch.get("type") == "node.move"
+           and ch.get("object_id") == h1), None)
+check("B04-h6: move commit exposes before/after parent_id + order_index",
+      mv is not None and mv["before"]["parent_id"] is None and mv["after"]["parent_id"] == h0
+      and isinstance(mv["before"]["order_index"], int) and isinstance(mv["after"]["order_index"], int),
+      str(mv)[:200])
+# search pagination: 12 matches, limit 5
+r6b = c.get(f"/api/v1/projects/{phist}/search", params={"q": "吞吐", "limit": 5})
+js1 = r6b.json()
+check("B04-s1: search 12 matches/limit5 -> page1 + paging fields",
+      r6b.status_code == 200 and js1.get("total") == 12 and len(js1["items"]) == 5
+      and js1["has_more"] is True and bool(js1.get("next_cursor")),
+      str({k: js1.get(k) for k in ("total", "has_more")}) if r6b.status_code == 200 else r6b.text[:200])
+r7b = c.get(f"/api/v1/projects/{phist}/search", params={"q": "吞吐", "limit": 5,
+                                                        "cursor": js1["next_cursor"]})
+js2 = r7b.json()
+r8b = c.get(f"/api/v1/projects/{phist}/search", params={"q": "吞吐", "limit": 5,
+                                                        "cursor": js2["next_cursor"]}
+            if js2.get("next_cursor") else {"q": "吞吐", "limit": 5})
+js3 = r8b.json()
+check("B04-s2: search pages 5/5/2 without overlap, closes cleanly",
+      len(js2["items"]) == 5 and len(js3["items"]) == 2 and js3["has_more"] is False
+      and js3["next_cursor"] is None
+      and len({x["id"] for x in js1["items"] + js2["items"] + js3["items"]}) == 12,
+      f"{len(js2['items'])}/{len(js3['items'])}")
+# project list pagination (SPEC: default max 50, cursor paging)
+rp1 = c.get("/api/v1/projects", params={"limit": 2})
+jp1 = rp1.json()
+rp2 = c.get("/api/v1/projects", params={"limit": 2, "cursor": jp1["next_cursor"]})
+jp2 = rp2.json()
+check("B04-p1: project list pages 2/2, disjoint, has_more correct",
+      rp1.status_code == 200 and rp2.status_code == 200
+      and len(jp1["items"]) == 2 and len(jp2["items"]) == 2
+      and jp2["has_more"] is False
+      and not set(i["id"] for i in jp1["items"]) & set(i["id"] for i in jp2["items"]),
+      f"{rp1.status_code}/{rp2.status_code} {len(jp1.get('items', []))}/{len(jp2.get('items', []))}")
 
 # ---------------- concurrency -------------------------------------------------
 codes = []
