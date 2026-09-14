@@ -51,3 +51,31 @@ export function threeWayMerge<T extends object>(
   }
   return { merged, conflicts };
 }
+
+/** Carry undecided conflicts across a refresh (R02).
+ *
+ *  A refresh re-derives conflicts from the *new* baseline, so a conflict the
+ *  user was shown but has not answered yet stops looking like one — the server
+ *  value has since become the common base. Dropping it there would silently
+ *  re-enable 保存 and let the user overwrite a teammate's commit without ever
+ *  having reviewed it, which is exactly what the conflict list exists to
+ *  prevent. So: keep an undecided conflict for as long as the draft still
+ *  differs from the server in that field, with the server column refreshed to
+ *  what the server holds *now*. It disappears only when the user answers it
+ *  (it leaves `undecided`), or when the two sides converge on their own. */
+export function preserveUndecided<T extends object>(
+  fresh: FieldConflict<T>[],
+  undecided: FieldConflict<T>[],
+  merged: T,
+  server: T,
+): FieldConflict<T>[] {
+  const out = [...fresh];
+  const seen = new Set(fresh.map((c) => c.field));
+  for (const c of undecided) {
+    if (seen.has(c.field)) continue;
+    const local = merged[c.field];
+    if (JSON.stringify(local) === JSON.stringify(server[c.field])) continue;
+    out.push({ ...c, local, server: server[c.field] });
+  }
+  return out;
+}

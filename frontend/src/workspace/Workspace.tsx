@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api, { uuidv4 } from "../lib/api";
 import { initialFolds } from "../lib/layout";
-import { threeWayMerge } from "../lib/merge";
+import { preserveUndecided, threeWayMerge } from "../lib/merge";
 import {
   ApiError,
   type CommitItem,
@@ -155,6 +155,12 @@ export default function Workspace({
   useEffect(() => {
     draftBaseRef.current = draftBase;
   }, [draftBase]);
+  /** R02: conflicts the user has NOT decided on yet. A refresh must never drop
+   *  one of these — see applyServerSnapshot. */
+  const draftConflictsRef = useRef<DraftConflict[]>([]);
+  useEffect(() => {
+    draftConflictsRef.current = draftConflicts;
+  }, [draftConflicts]);
 
   const dirty = useMemo(
     () =>
@@ -225,10 +231,11 @@ export default function Workspace({
     const base = draftBaseRef.current;
     if (d && base && dirtyRef.current) {
       const { merged, conflicts } = threeWayMerge(base, d, server, (f) => DRAFT_FIELD_LABEL[f]);
+      const next = preserveUndecided(conflicts, draftConflictsRef.current, merged, server);
       setDraft(merged);
       setDraftBase(server);
-      setDraftConflicts(conflicts);
-      return conflicts;
+      setDraftConflicts(next);
+      return next;
     }
     setDraft(server);
     setDraftBase(server);

@@ -335,3 +335,93 @@ test("B04 归档→恢复：画布上找回已归档节点并原位恢复", asyn
   expect(types).toContain("归档节点");
   expect(types).toContain("恢复节点");
 });
+
+/** R02：提交成功后的自动刷新（`syncAll`）此前只取三方合并的 `merged`、丢掉
+ *  `conflicts` 并把基线无条件前移。这条路径的后果比"少一个提示"更重：刷新后
+ *  未处理的同字段冲突会被静默清空、保存按钮重新可用，用户随手保存就把队友的
+ *  提交覆盖掉了——正是冲突列表要防的事。本用例走这条真实可达的路径：
+ *  编辑中 → 另一位协作者提交 → 轮询发现新版本 → 「载入更新」出现三方比较 →
+ *  在**未处理**冲突的情况下做一次无关的成功提交（触发 syncAll）→ 冲突必须还在。 */
+test("R02 提交后的自动刷新（syncAll）不得静默清掉未处理的同字段冲突", async ({ page }) => {
+  const nid = crypto.randomUUID();
+  let r = await api(page, "POST", "/api/v1/projects", {
+    request_id: crypto.randomUUID(),
+    name: `E2E 刷新冲突-${crypto.randomUUID().slice(0, 8)}`,
+    objective: "R02：syncAll 路径的三方冲突",
+  });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const pid = r.json.id;
+  const rev0 = (await api(page, "GET", `/api/v1/projects/${pid}`)).json.revision;
+  const BASE_ED = "基线：服务器上的原始摘要";
+  const LOCAL = "LOCAL-2：我正在编辑但还没保存";
+  const REMOTE = "REMOTE-2：另一位协作者在我编辑期间提交的";
+  r = await api(page, "POST", `/api/v1/projects/${pid}/commits`, {
+    request_id: crypto.randomUUID(),
+    expected_revision: rev0,
+    client_label: "seed",
+    summary: "e2e 刷新冲突骨架",
+    operations: [
+      { op: "node.create", id: nid, parent_id: null, kind: "question",
+        title: "刷新冲突例：编辑期间别人也改了这个字段", summary: BASE_ED,
+        status: "in_progress" },
+    ],
+  });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+
+  await enterStudio(page, pid);
+  await page.locator(".rm-card", { hasText: "刷新冲突例" }).first().click();
+  await page.getByRole("button", { name: "编辑" }).click();
+  const summaryBox = page.locator("textarea").first();
+  await summaryBox.fill(LOCAL);
+  await expect(page.locator(".hint", { hasText: "有未保存的修改" }).first()).toBeVisible();
+
+  // 另一位协作者用第二个令牌改同一字段（本地草稿仍未保存）
+  const rev1 = (await api(page, "GET", `/api/v1/projects/${pid}`)).json.revision;
+  r = await api(page, "POST", `/api/v1/projects/${pid}/commits`, {
+    request_id: crypto.randomUUID(),
+    expected_revision: rev1,
+    client_label: "other-researcher",
+    summary: "远端：改同一字段（应触发新冲突）",
+    operations: [{ op: "node.update", id: nid, fields: { summary: REMOTE } }],
+  }, OTHER_TOKEN);
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+
+  // 前端靠轮询/窗口聚焦发现新版本；这里派发真实的 focus 事件触发它（不等 20s 轮询）
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.getByRole("button", { name: "载入更新" }).click();
+
+  const row = page.locator(".conflict-field", { hasText: "摘要" });
+  await expect(row).toHaveCount(1, { timeout: 15_000 });
+  await expect(row.locator(".conflict-col pre").nth(0)).toHaveText(BASE_ED);
+  await expect(row.locator(".conflict-col pre").nth(1)).toHaveText(LOCAL);
+  await expect(row.locator(".conflict-col pre").nth(2)).toHaveText(REMOTE);
+  await expect(page.getByRole("button", { name: "保存" })).toBeDisabled();
+
+  // ---- 关键一步：冲突仍未处理，此时做一次与该节点无关的成功提交 ----
+  // 提交成功后 commit() 会 await syncAll()，而 syncAll 会重新读取当前节点。
+  // 修复前：重新合并的基线已经是服务器值 v2，冲突"看起来"不存在了 → 列表被清空、
+  // 保存重新可用 → 用户按保存就静默覆盖了 REMOTE。修复后：未处理的冲突必须保留。
+  await page.getByRole("button", { name: "+ 一级路线" }).click();
+  const modal = page.locator(".modal").filter({ hasText: "新增节点" });
+  await modal.locator("input").first().fill("刷新冲突例：无关的新路线（合成）");
+  await modal.getByRole("button", { name: "创建" }).click();
+  await expect(page.locator(".rm-card", { hasText: "无关的新路线" }).first())
+    .toBeVisible({ timeout: 15_000 }); // 提交确实成功了（否则下面的断言会因别的原因通过）
+
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".conflict-col pre").nth(0)).toHaveText(BASE_ED);
+  await expect(row.locator(".conflict-col pre").nth(1)).toHaveText(LOCAL);
+  await expect(row.locator(".conflict-col pre").nth(2)).toHaveText(REMOTE);
+  await expect(page.getByRole("button", { name: "保存" })).toBeDisabled();
+  await expect(summaryBox).toHaveValue(LOCAL); // 草稿一字未动
+
+  // 选择是真正生效的：选「保留我的」后冲突消失、保存可用，提交后服务器就是它
+  await expect(page.getByRole("button", { name: "保存" })).toBeDisabled();
+  await row.getByRole("button", { name: "保留我的" }).click();
+  await expect(page.locator(".conflict-field")).toHaveCount(0);
+  await expect(summaryBox).toHaveValue(LOCAL);
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect
+    .poll(async () => (await api(page, "GET", `/api/v1/projects/${pid}/nodes/${nid}`)).json.summary)
+    .toBe(LOCAL);
+});
