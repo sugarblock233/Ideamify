@@ -6,7 +6,7 @@
 import React from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CARD_W, CARD_H } from "../lib/layout";
-import { KIND_LABEL, STATUS_COLOR, STATUS_LABEL } from "../lib/format";
+import { STATUS_COLOR, kindLabel, statusLabel } from "../lib/format";
 import type { GraphNode } from "../lib/types";
 
 export interface CardData extends Record<string, unknown> {
@@ -44,13 +44,13 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
       <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0 }} />
       <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0 }} />
       <div className="row1">
-        <span className="kind-badge">{KIND_LABEL[n.kind]}</span>
+        <span className="kind-badge">{kindLabel(n.kind)}</span>
         <span
           className="status-pill"
           style={{ color: STATUS_COLOR[n.status], background: "rgba(0,0,0,0.03)" }}
         >
           <span className="dot" style={{ background: STATUS_COLOR[n.status] }} />
-          {STATUS_LABEL[n.status]}
+          {statusLabel(n.status)}
         </span>
         {n.archived && <span className="arch-pill">已归档</span>}
       </div>

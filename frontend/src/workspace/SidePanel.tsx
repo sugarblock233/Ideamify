@@ -15,7 +15,7 @@ import type {
   RelationKind,
 } from "../lib/types";
 import { NODE_KINDS, NODE_STATUSES, RELATION_KINDS } from "../lib/types";
-import { KIND_LABEL, RELATION_LABEL, STATUS_LABEL, STATUS_COLOR, fmtTime } from "../lib/format";
+import { STATUS_COLOR, fmtTime, kindLabel, relationKindLabel, statusLabel } from "../lib/format";
 import { MAX_CANVAS_RELATION, relationLabel } from "../lib/relations";
 import { renderMarkdown } from "../lib/markdown";
 import type { FieldConflict } from "../lib/merge";
@@ -73,8 +73,8 @@ export type DraftConflict = FieldConflict<Draft>;
 
 /** Human-readable rendering of any draft field for the comparison table. */
 export function formatDraftValue(field: keyof Draft, v: Draft[keyof Draft]): string {
-  if (field === "kind") return KIND_LABEL[v as NodeKind];
-  if (field === "status") return STATUS_LABEL[v as NodeStatus];
+  if (field === "kind") return kindLabel(v as NodeKind);
+  if (field === "status") return statusLabel(v as NodeStatus);
   if (field === "tags") {
     const t = v as string[];
     return t.length ? t.join("、") : "（空）";
@@ -255,7 +255,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
             fontSize: 12,
           }}
         >
-          {KIND_LABEL[n.kind]} · {STATUS_LABEL[n.status]}
+          {kindLabel(n.kind)} · {statusLabel(n.status)}
         </span>
       </h2>
       <div className="muted" style={{ marginBottom: 8 }}>
@@ -301,7 +301,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
 
       {missing.length > 0 && (
         <div className="hint">
-          状态为“{STATUS_LABEL[d.status]}”要求填写：{missing.join("、")}。这只是记录完整性要求，不是自动科学审查。
+          状态为“{statusLabel(d.status)}”要求填写：{missing.join("、")}。这只是记录完整性要求，不是自动科学审查。
         </div>
       )}
 
@@ -315,12 +315,12 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
       <div style={{ display: "flex", gap: 8 }}>
         <select value={d.kind} onChange={(e) => set({ kind: e.target.value as NodeKind })}>
           {NODE_KINDS.map((k) => (
-            <option key={k} value={k}>{KIND_LABEL[k]}</option>
+            <option key={k} value={k}>{kindLabel(k)}</option>
           ))}
         </select>
         <select value={d.status} onChange={(e) => set({ status: e.target.value as NodeStatus })}>
           {NODE_STATUSES.map((s) => (
-            <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+            <option key={s} value={s}>{statusLabel(s)}</option>
           ))}
         </select>
       </div>
@@ -838,7 +838,7 @@ function RelationItemView({ r, p }: { r: RelationItem; p: SidePanelProps }) {
           <div style={{ display: "flex", gap: 6 }}>
             <select value={kind} onChange={(e) => setKind(e.target.value as RelationKind)}>
               {RELATION_KINDS.map((k) => (
-                <option key={k} value={k}>{RELATION_LABEL[k]}</option>
+                <option key={k} value={k}>{relationKindLabel(k)}</option>
               ))}
             </select>
             <input value={reason} maxLength={500} style={{ flex: 1 }} placeholder="一句原因（1–500）" onChange={(e) => setReason(e.target.value)} />
@@ -977,8 +977,8 @@ function CreateSnapshot({ entry }: { entry: ChangeEntry }) {
   const after = (entry.after ?? {}) as Record<string, unknown>;
   const all: [string, string][] = [
     ["标题", s(after.title)],
-    ["类型", after.kind ? KIND_LABEL[after.kind as NodeKind] ?? s(after.kind) : ""],
-    ["状态", after.status ? STATUS_LABEL[after.status as NodeStatus] ?? s(after.status) : ""],
+    ["类型", after.kind ? kindLabel(after.kind as NodeKind) ?? s(after.kind) : ""],
+    ["状态", after.status ? statusLabel(after.status as NodeStatus) ?? s(after.status) : ""],
     ["摘要", s(after.summary)],
     ["适用条件", s(after.scope)],
     ["观察", s(after.finding)],

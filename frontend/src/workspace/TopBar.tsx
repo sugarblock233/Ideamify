@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Project, SearchItem, CommitItem } from "../lib/types";
-import { STATUS_LABEL, fmtTime } from "../lib/format";
+import { fmtTime, statusLabel } from "../lib/format";
 import { getLang, setLang, useT } from "../lib/i18n";
 import type { ProjectLite } from "../gate/TokenGate";
 
@@ -121,7 +121,7 @@ export default function TopBar(p: TopBarProps) {
               >
                 <b>{s.title}</b>
                 <span style={{ color: "var(--ink-dim)" }}>
-                  {" "}· {s.path.map((x) => x.title).join(" / ") || t("common.first.level.node")} · {STATUS_LABEL[s.status]}
+                  {" "}· {s.path.map((x) => x.title).join(" / ") || t("common.first.level.node")} · {statusLabel(s.status)}
                 </span>
                 <div className="muted">{s.summary}</div>
               </div>

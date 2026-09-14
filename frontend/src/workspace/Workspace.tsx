@@ -22,7 +22,8 @@ import {
   type RelationKind,
   type SearchItem,
 } from "../lib/types";
-import { STATUS_LABEL } from "../lib/format";
+import { statusLabel } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { replaceDeepLink } from "../lib/deeplink";
 import Canvas, { loadSavedView, saveView } from "./Canvas";
 import SidePanel, {
@@ -52,6 +53,7 @@ export default function Workspace({
   refreshProjectList,
   onExit,
 }: WorkspaceProps) {
+  const t = useT();
   const [project, setProject] = useState<Project | null>(null);
   const [graph, setGraph] = useState<GraphNode[]>([]);
   // Reading a node can advance the known project revision without updating
@@ -212,7 +214,7 @@ export default function Workspace({
         setRelHasMore(r.has_more);
         setRelCursor(r.next_cursor);
       } catch (e) {
-        ironToast(e instanceof ApiError ? e.message : "关联加载失败", "err");
+        ironToast(e instanceof ApiError ? e.message : t("ws.activity.load.fail"), "err");
       }
     },
     [pid, ironToast],
@@ -275,7 +277,7 @@ export default function Workspace({
         const conflicts = applyServerSnapshot(nf);
         setDraftBaseRev(nf.project_revision);
         if (conflicts.length) {
-          ironToast("刷新后发现同字段冲突，请在详情面板逐项核对", "err");
+          ironToast(t("ws.conflict.after.refresh"), "err");
         }
       } catch {
         setNode(null);
@@ -296,12 +298,12 @@ export default function Workspace({
    *  returns false and the caller must leave the draft and the view untouched. */
   function confirmLeaveDraft(what: string): boolean {
     if (!dirty) return true;
-    return window.confirm(`有未保存的草稿。${what}草稿将丢失，确定继续？`);
+    return window.confirm(t("ws.confirm.draft", { what }));
   }
 
   function guardLeave(targetId?: string | null): boolean {
     if ((targetId ?? null) === selectedId) return true;
-    return confirmLeaveDraft("离开当前节点，");
+    return confirmLeaveDraft(t("ws.confirm.leave.node"));
   }
 
   const selectNode = useCallback(
@@ -340,7 +342,7 @@ export default function Workspace({
         setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
         setDraftBaseRev(nf.project_revision);
       } catch (e) {
-        ironToast(e instanceof ApiError ? e.message : "节点加载失败", "err");
+        ironToast(e instanceof ApiError ? e.message : t("ws.node.load.fail"), "err");
       } finally {
         setNodeLoading(false);
       }
@@ -469,7 +471,7 @@ export default function Workspace({
           setFoldsRaw(initFolds);
         }
       } catch (e) {
-        ironToast(e instanceof ApiError ? e.message : "加载失败", "err");
+        ironToast(e instanceof ApiError ? e.message : t("ws.load.fail"), "err");
       } finally {
         if (alive) setLoadingAll(false);
       }
@@ -497,7 +499,7 @@ export default function Workspace({
           graphRevisionRef.current = g.project_revision;
         }
       } catch (e) {
-        if (alive) ironToast(e instanceof ApiError ? e.message : "加载失败", "err");
+        if (alive) ironToast(e instanceof ApiError ? e.message : t("ws.load.fail"), "err");
       }
     })();
     return () => {
@@ -580,9 +582,9 @@ export default function Workspace({
         loadNodeRelations(selectedRef.current, incArchRef.current, null, false);
         loadNodeCommits(selectedRef.current);
       }
-      ironToast("已载入最新记录", "ok");
+      ironToast(t("ws.updates.loaded"), "ok");
     } catch (e) {
-      ironToast(e instanceof ApiError ? e.message : "载入更新失败", "err");
+      ironToast(e instanceof ApiError ? e.message : t("ws.updates.load.fail"), "err");
     }
   }
 
@@ -602,9 +604,9 @@ async function rebaseDraft() {
       setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
       setConflictRev(null);
       setDraftErr(null);
-      ironToast("已载入新版并重排草稿", "ok");
+      ironToast(t("ws.rebase.done"), "ok");
     } catch (e) {
-      ironToast(e instanceof ApiError ? e.message : "重载失败", "err");
+      ironToast(e instanceof ApiError ? e.message : t("ws.rebase.fail"), "err");
     }
   }
 
@@ -634,10 +636,8 @@ async function rebaseDraft() {
     } catch (e) {
       if (e instanceof ApiError && e.code === "REVISION_CONFLICT") {
         setConflictRev(e.currentRevision);
-        setDraftErr(
-          `版本冲突：服务器已更新到 v${e.currentRevision}。你的草稿完整保留；点“载入新版并重排草稿”后再保存，不会静默覆盖他人修改。`,
-        );
-        ironToast("版本冲突（已有他人提交）", "err");
+        setDraftErr(t("ws.conflict.banner", { v: String(e.currentRevision) }));
+        ironToast(t("ws.conflict.toast"), "err");
         return null;
       }
       if (opts.onFail) {
@@ -647,12 +647,12 @@ async function rebaseDraft() {
       if (e instanceof ApiError) {
         const missing = e.details["missing"];
         setDraftErr(
-          `${e.message}${Array.isArray(missing) ? `（缺失：${(missing as string[]).join("、")}）` : ""}`,
+          `${e.message}${Array.isArray(missing) ? t("ws.err.missing", { items: (missing as string[]).join(t("ws.err.missing.sep")) }) : ""}`,
         );
       } else {
         setDraftErr(String(e));
       }
-      ironToast(e instanceof ApiError ? e.message : "提交失败", "err");
+      ironToast(e instanceof ApiError ? e.message : t("ws.commit.fail"), "err");
       return null;
     }
   }
@@ -662,17 +662,11 @@ async function rebaseDraft() {
     // R02: an unresolved same-field conflict must never be submitted as if the
     // user had reviewed it.
     if (draftConflicts.length) {
-      ironToast(
-        `还有 ${draftConflicts.length} 个字段与他人的修改冲突未处理：请在冲突区逐项选择后再保存`,
-        "err",
-      );
+      ironToast(t("ws.conflicts.unresolved", { n: draftConflicts.length }), "err");
       return;
     }
     if (draftStale) {
-      ironToast(
-        `草稿基于 v${draftBaseRev}，服务器已是 v${project?.revision}：先点“载入新版并重排草稿”再保存`,
-        "err",
-      );
+      ironToast(t("ws.draft.stale", { base: String(draftBaseRev), server: String(project?.revision) }), "err");
       return;
     }
     const fields = diffDraft(draftBase, draft);
@@ -680,12 +674,12 @@ async function rebaseDraft() {
     // A02: commit against the revision this draft was read from.
     const res = await commit(
       [{ op: "node.update", id: node.id, fields }],
-      `更新节点：${draft.title}`,
+      t("ws.summary.update", { title: draft.title }),
       { baseRev: draftBaseRev ?? undefined },
     );
     if (res) {
       setDraftErr(null);
-      ironToast(`已保存（v${res.revision}）`, "ok");
+      ironToast(t("ws.saved.rev", { v: res.revision }), "ok");
     }
     // on success syncAll() already re-pins the draft base (or rebases it)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -736,20 +730,23 @@ async function rebaseDraft() {
     if (decision) op.decision = decision;
     const evs = form.evidence?.filter((e) => e.label.trim() || e.value.trim());
     if (evs && evs.length > 0) op.evidence = evs.map((e) => ({ ...e }));
-    const res = await commit([op], `新增${parent ? "子节点" : "一级路线"}：${form.title}`, {
+    const res = await commit(
+      [op],
+      t(parent ? "ws.summary.create.child" : "ws.summary.create.root", { title: form.title }),
+      {
       onFail: (e) => {
         const msg = e instanceof ApiError ? e.message : String(e);
         const missing = e instanceof ApiError ? e.details["missing"] : undefined;
         setCreateNodeErr(
-          `${msg}${Array.isArray(missing) ? `（缺失：${(missing as string[]).join("、")}）` : ""}`,
+          `${msg}${Array.isArray(missing) ? t("ws.err.missing", { items: (missing as string[]).join(t("ws.err.missing.sep")) }) : ""}`,
         );
-        ironToast(e instanceof ApiError ? e.message : "创建失败", "err");
+        ironToast(e instanceof ApiError ? e.message : t("ws.create.fail"), "err");
       },
     });
     if (res) {
       setCreateNodeParent(undefined);
       setCreateNodeErr(null);
-      ironToast(`已创建（v${res.revision}）`, "ok");
+      ironToast(t("ws.created.rev", { v: res.revision }), "ok");
       void selectNode(id, { locate: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -782,7 +779,7 @@ async function rebaseDraft() {
       return parts.join(" / ");
     };
     const opts: { id: string | null; label: string }[] = [
-      { id: null, label: "（项目一级节点）" },
+      { id: null, label: t("common.top.level.option") },
     ];
     for (const n of graph) {
       if (excluded.has(n.id)) continue;
@@ -802,7 +799,7 @@ async function rebaseDraft() {
 
   async function moveNodeAction(parent: string | null) {
     if (!node) return;
-    await commit([{ op: "node.move", id: node.id, parent_id: parent }], `移动归属：${node.title}`);
+    await commit([{ op: "node.move", id: node.id, parent_id: parent }], t("ws.summary.move", { title: node.title }));
   }
   async function moveStepAction(dir: "up" | "down") {
     if (!node || !siblingInfo || siblingInfo.idx === -1) return;
@@ -813,16 +810,16 @@ async function rebaseDraft() {
     else return;
     await commit(
       [{ op: "node.move", id: node.id, parent_id: node.parent_id, after_id: afterId }],
-      `${dir === "up" ? "上移" : "下移"}：${node.title}`,
+      t(dir === "up" ? "ws.summary.move.up" : "ws.summary.move.down", { title: node.title }),
     );
   }
   async function archiveNodeAction(reason: string) {
     if (!node) return;
-    await commit([{ op: "node.archive", id: node.id, reason }], `归档节点：${node.title}`);
+    await commit([{ op: "node.archive", id: node.id, reason }], t("ws.summary.archive.node", { title: node.title }));
   }
   async function restoreNodeAction(reason: string) {
     if (!node) return;
-    await commit([{ op: "node.restore", id: node.id, reason }], `恢复节点：${node.title}`);
+    await commit([{ op: "node.restore", id: node.id, reason }], t("ws.summary.restore.node", { title: node.title }));
   }
 
   /* ------------------------------ relation actions ------------------------- */
@@ -831,7 +828,7 @@ async function rebaseDraft() {
     if (!node) return;
     const res = await commit(
       [{ op: "relation.create", id: uuidv4(), source_id: node.id, target_id: targetId, kind, reason }],
-      `建立关联：${node.title} ${kind} → ${targetId.slice(0, 8)}…`,
+      t("ws.summary.relation.create", { source: node.title, kind, target: targetId.slice(0, 8) }),
     );
     if (res) {
       setCreateRelFrom(null);
@@ -844,13 +841,13 @@ async function rebaseDraft() {
     if (f.kind !== r.kind) fields.kind = f.kind;
     if (f.reason !== r.reason) fields.reason = f.reason;
     if (Object.keys(fields).length === 0) return;
-    await commit([{ op: "relation.update", id: r.id, fields }], `修改关联：${r.kind}`);
+    await commit([{ op: "relation.update", id: r.id, fields }], t("ws.summary.relation.update", { kind: r.kind }));
   }
   async function archiveRelationAction(r: RelationItem, reason: string) {
-    await commit([{ op: "relation.archive", id: r.id, reason }], `归档关联 ${r.kind}`);
+    await commit([{ op: "relation.archive", id: r.id, reason }], t("ws.summary.relation.archive", { kind: r.kind }));
   }
   async function restoreRelationAction(r: RelationItem, reason: string) {
-    await commit([{ op: "relation.restore", id: r.id, reason }], `恢复关联 ${r.kind}`);
+    await commit([{ op: "relation.restore", id: r.id, reason }], t("ws.summary.relation.restore", { kind: r.kind }));
   }
 
   /* --------------------------------- exports --------------------------------- */
@@ -866,9 +863,9 @@ async function rebaseDraft() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      ironToast("导出完成（含归档记录与全部历史）", "ok");
+      ironToast(t("ws.export.done"), "ok");
     } catch (e) {
-      ironToast(e instanceof ApiError ? e.message : "导出失败", "err");
+      ironToast(e instanceof ApiError ? e.message : t("ws.export.fail"), "err");
     }
   }
 
@@ -881,7 +878,7 @@ async function rebaseDraft() {
       setSearchTotal(0);
       return;
     }
-    const t = window.setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       setSearchLoading(true);
       try {
         const r = await api.search(pid, q, 30);
@@ -893,7 +890,7 @@ async function rebaseDraft() {
         setSearchLoading(false);
       }
     }, 280);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, [searchQ, pid]);
 
   const searchProp: TopBarSearch = {
@@ -931,7 +928,7 @@ async function rebaseDraft() {
     const alive = new Set(graph.map((n) => n.id));
     const target = c.node_ids.find((id) => alive.has(id));
     if (target) locateNode(target);
-    else void ironToast("该提交涉及的对象已归档", "err");
+    else void ironToast(t("ws.recent.archived"), "err");
   }
 
   /* --------------------------------- render -------------------------------- */
@@ -945,13 +942,13 @@ async function rebaseDraft() {
         projects={projects}
         currentProjectId={pid}
         onSwitchProject={(pid2) => {
-          if (!confirmLeaveDraft("切换项目，")) return;
+          if (!confirmLeaveDraft(t("ws.confirm.switch.project"))) return;
           onChangeProject(pid2);
         }}
         onCreateProject={() => {
           // Creating a project navigates away (onChangeProject below), so the
           // guard belongs here — before the user fills in a form they'd lose.
-          if (!confirmLeaveDraft("新建项目会离开当前项目，")) return;
+          if (!confirmLeaveDraft(t("ws.confirm.new.project"))) return;
           setModalProject("create");
         }}
         onEditProject={() => setModalProject("edit")}
@@ -971,10 +968,10 @@ async function rebaseDraft() {
                   await loadUpdates();
                 } else {
                   setProject((p) => (p ? { ...p, revision: p2.revision } : p));
-                  ironToast("记录目前无变化", "ok");
+                  ironToast(t("ws.no.change"), "ok");
                 }
               } catch (e) {
-                ironToast(e instanceof ApiError ? e.message : "刷新失败", "err");
+                ironToast(e instanceof ApiError ? e.message : t("ws.refresh.fail"), "err");
               }
             })();
         }}
@@ -983,7 +980,7 @@ async function rebaseDraft() {
         showArchived={showArchived}
         onToggleArchived={() => setShowArchived((v) => !v)}
         onExit={() => {
-          if (!confirmLeaveDraft("退出当前项目，")) return;
+          if (!confirmLeaveDraft(t("ws.confirm.exit"))) return;
           onExit();
         }}
         search={searchProp}
@@ -992,7 +989,7 @@ async function rebaseDraft() {
 
       <div className="workspace">
         <div className="canvas-wrap">
-          {loadingAll && <div className="empty" style={{ padding: 30 }}>正在加载项目…</div>}
+          {loadingAll && <div className="empty" style={{ padding: 30 }}>{t("ws.loading.project")}</div>}
           <Canvas
             projectId={pid}
             project={project}
@@ -1100,7 +1097,7 @@ async function rebaseDraft() {
 
       {createNodeParent !== undefined && (
         <CreateNodeModal
-          parentLabel={createNodeParent ? nodeTitleById(graph, createNodeParent) : "（项目一级节点）"}
+          parentLabel={createNodeParent ? nodeTitleById(graph, createNodeParent) : t("common.top.level.option")}
           err={createNodeErr}
           onClose={() => {
             setCreateNodeParent(undefined);
@@ -1128,7 +1125,7 @@ async function rebaseDraft() {
             } else {
               await commit(
                 [{ op: "project.update", fields: { name, objective } }],
-                "更新项目名称与目标",
+                t("ws.summary.project.update"),
               );
               setModalProject("");
             }
@@ -1201,6 +1198,7 @@ function CreateNodeModal({
   onClose: () => void;
   onCreate: (f: NewNodeForm) => void | Promise<void>;
 }) {
+  const t = useT();
   const [kind, setKind] = useState<import("../lib/types").NodeKind>("idea");
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
@@ -1228,7 +1226,7 @@ function CreateNodeModal({
         title: title.trim(),
         summary: summary.trim(),
         status,
-        tags: tags.split(/[,，]/).map((t) => t.trim()).filter(Boolean).slice(0, 10),
+        tags: tags.split(/[,，]/).map((x) => x.trim()).filter(Boolean).slice(0, 10),
         ...(gated
           ? {
               scope: scope.trim(),
@@ -1243,63 +1241,61 @@ function CreateNodeModal({
   const setEvRow = (i: number, patch: Partial<{ kind: "inline" | "url" | "path"; label: string; value: string; note: string }>) =>
     setEv((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   return (
-    <Modal title={`新增节点 · 父级：${parentLabel}`} onClose={onClose}>
+    <Modal title={t("modal.create.title", { parent: parentLabel })} onClose={onClose}>
       <div style={{ display: "flex", gap: 8 }}>
         <select value={kind} onChange={(e) => setKind(e.target.value as NewNodeForm["kind"])}>
-          <option value="question">问题</option>
-          <option value="idea">想法</option>
-          <option value="attempt">尝试</option>
-          <option value="finding">发现（含观察/结果）</option>
+          <option value="question">{t("kind.question")}</option>
+          <option value="idea">{t("kind.idea")}</option>
+          <option value="attempt">{t("kind.attempt")}</option>
+          <option value="finding">{t("kind.finding.long")}</option>
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value as NewNodeForm["status"])}>
           {["unexplored", "in_progress", "promising", "supported", "not_supported", "inconclusive"].map((s) => (
-            <option key={s} value={s}>{STATUS_LABEL[s as import("../lib/types").NodeStatus]}</option>
+            <option key={s} value={s}>{statusLabel(s as import("../lib/types").NodeStatus)}</option>
           ))}
         </select>
       </div>
-      <label className="field">标题（1–80）</label>
+      <label className="field">{t("modal.field.title")}</label>
       <input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%" }} autoFocus />
-      <label className="field">摘要（一句话研究增量，0–280）</label>
+      <label className="field">{t("modal.field.summary")}</label>
       <textarea value={summary} maxLength={280} onChange={(e) => setSummary(e.target.value)} style={{ width: "100%" }} />
-      <label className="field">标签（逗号分隔）</label>
+      <label className="field">{t("modal.field.tags")}</label>
       <input value={tags} onChange={(e) => setTags(e.target.value)} style={{ width: "100%" }} />
       {gated && (
         <div className="gated-fields">
-          <div className="hint">
-            状态为「受支持／不支持」时，必须给出适用条件、发现与决定，并至少 1 条证据（与服务端同一闸口）。
-          </div>
-          <label className="field">适用条件 scope（必填，≤1000）</label>
-          <textarea value={scope} maxLength={1000} onChange={(e) => setScope(e.target.value)} style={{ width: "100%" }} placeholder="该结论适用于哪些材料 / 工艺 / 条件" />
-          <label className="field">发现 finding（必填，≤2000）</label>
-          <textarea value={finding} maxLength={2000} onChange={(e) => setFinding(e.target.value)} style={{ width: "100%" }} placeholder="观察到的事实与结果，尽量定量" />
-          <label className="field">决定 decision（必填，≤2000）</label>
-          <textarea value={decision} maxLength={2000} onChange={(e) => setDecision(e.target.value)} style={{ width: "100%" }} placeholder="采纳 / 放弃 / 修改什么条件，以及为什么" />
-          <label className="field">证据（≥1 条）</label>
+          <div className="hint">{t("modal.gated.hint")}</div>
+          <label className="field">{t("modal.field.scope")}</label>
+          <textarea value={scope} maxLength={1000} onChange={(e) => setScope(e.target.value)} style={{ width: "100%" }} placeholder={t("modal.ph.scope")} />
+          <label className="field">{t("modal.field.finding")}</label>
+          <textarea value={finding} maxLength={2000} onChange={(e) => setFinding(e.target.value)} style={{ width: "100%" }} placeholder={t("modal.ph.finding")} />
+          <label className="field">{t("modal.field.decision")}</label>
+          <textarea value={decision} maxLength={2000} onChange={(e) => setDecision(e.target.value)} style={{ width: "100%" }} placeholder={t("modal.ph.decision")} />
+          <label className="field">{t("modal.field.evidence")}</label>
           {ev.map((e, i) => (
             <div className="evid-row gated-ev" key={i}>
               <select value={e.kind} onChange={(evn) => setEvRow(i, { kind: evn.target.value as "inline" | "url" | "path" })}>
-                <option value="inline">行内记录</option>
+                <option value="inline">{t("modal.ev.inline")}</option>
                 <option value="url">url</option>
-                <option value="path">路径</option>
+                <option value="path">{t("modal.ev.path")}</option>
               </select>
-              <input value={e.label} maxLength={80} onChange={(evn) => setEvRow(i, { label: evn.target.value })} placeholder="名称" />
-              <input value={e.value} maxLength={2000} onChange={(evn) => setEvRow(i, { value: evn.target.value })} placeholder={e.kind === "url" ? "https://…" : e.kind === "path" ? "相对仓库路径" : "内容"} />
-              <button type="button" title="删除这条证据" onClick={() => setEv((rows) => rows.filter((_, j) => j !== i))}>✕</button>
+              <input value={e.label} maxLength={80} onChange={(evn) => setEvRow(i, { label: evn.target.value })} placeholder={t("modal.ev.label.ph")} />
+              <input value={e.value} maxLength={2000} onChange={(evn) => setEvRow(i, { value: evn.target.value })} placeholder={e.kind === "url" ? t("modal.ph.url") : e.kind === "path" ? t("modal.ph.path") : t("modal.ph.inline")} />
+              <button type="button" title={t("modal.ev.remove.title")} onClick={() => setEv((rows) => rows.filter((_, j) => j !== i))}>✕</button>
             </div>
           ))}
           <button
             type="button"
             onClick={() => setEv((rows) => [...rows, { kind: "inline", label: "", value: "", note: "" }])}
           >
-            ＋ 添加证据
+            {t("modal.ev.add")}
           </button>
         </div>
       )}
       {err && <div className="form-err">{err}</div>}
       <div className="mrow">
-        <button onClick={onClose} disabled={busy}>取消</button>
+        <button onClick={onClose} disabled={busy}>{t("common.cancel")}</button>
         <button className="primary" disabled={!valid || busy} onClick={submit}>
-          {busy ? "创建中…" : "创建"}
+          {busy ? t("modal.creating") : t("modal.create")}
         </button>
       </div>
     </Modal>
@@ -1319,21 +1315,22 @@ function ProjectModal({
   onAction: (name: string, objective: string) => Promise<void>;
   onError: (e: Error) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState(mode === "edit" ? project.name : "");
   const [objective, setObjective] = useState(mode === "edit" ? project.objective : "");
   const valid = name.trim().length >= 1 && name.trim().length <= 100 && objective.trim().length >= 1;
   const [busy, setBusy] = useState(false);
   return (
-    <Modal title={mode === "create" ? "创建项目" : "项目设置（名称与目标）"} onClose={onClose}>
-      <label className="field">项目名（1–100）</label>
+    <Modal title={mode === "create" ? t("empty.create") : t("modal.project.edit.title")} onClose={onClose}>
+      <label className="field">{t("empty.name.label")}</label>
       <input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} style={{ width: "100%" }} autoFocus />
-      <label className="field">研究目标（1–4000）</label>
+      <label className="field">{t("empty.objective.label")}</label>
       <textarea value={objective} maxLength={4000} onChange={(e) => setObjective(e.target.value)} style={{ width: "100%", minHeight: 110 }} />
       <ModalFooter
         busy={busy}
         onCancel={onClose}
         canSubmit={valid && !busy}
-        submitLabel={mode === "create" ? "创建项目" : "保存"}
+        submitLabel={mode === "create" ? t("empty.create") : t("modal.common.save")}
         onSubmit={() => {
           setBusy(true);
           onAction(name.trim(), objective.trim()).catch(onError).finally(() => setBusy(false));
@@ -1354,6 +1351,7 @@ function CreateRelationModal({
   onClose: () => void;
   onCreate: (targetId: string, kind: RelationKind, reason: string) => void;
 }) {
+  const t = useT();
   const [filter, setFilter] = useState("");
   const [target, setTarget] = useState("");
   const [kind, setKind] = useState<RelationKind>("related");
@@ -1367,43 +1365,43 @@ function CreateRelationModal({
       return (
         n.title.toLowerCase().includes(f) ||
         n.summary.toLowerCase().includes(f) ||
-        n.tags.some((t) => t.toLowerCase().includes(f))
+        n.tags.some((tg) => tg.toLowerCase().includes(f))
       );
     })
     .slice(0, 80);
   return (
-    <Modal title={`新增关联 · 起点：${from?.title ?? ""}（方向：本节点 → 目标）`} onClose={onClose}>
-      <label className="field">选择目标（输入关键词缩小范围）</label>
-      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="如：溶剂热 / 高压 / 催化剂" style={{ width: "100%" }} />
+    <Modal title={t("modal.rel.title", { from: from?.title ?? "" })} onClose={onClose}>
+      <label className="field">{t("modal.rel.target.label")}</label>
+      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("modal.rel.target.ph")} style={{ width: "100%" }} />
       <select value={target} onChange={(e) => setTarget(e.target.value)} style={{ width: "100%", marginTop: 6 }}>
-        <option value="">— 从 {cands.length} 个候选中选择 —</option>
+        <option value="">{t("modal.rel.candidates", { n: cands.length })}</option>
         {cands.map((n) => {
           const pathTitle = pathTextOf(n, nodes);
           return <option key={n.id} value={n.id}>{n.title} · {pathTitle}</option>;
         })}
       </select>
-      <label className="field">关系类型（方向固定：本节点 → 目标）</label>
+      <label className="field">{t("modal.rel.kind.label")}</label>
       <select value={kind} onChange={(e) => setKind(e.target.value as RelationKind)} style={{ width: "100%" }}>
-        <option value="related">相关 related（无向）</option>
-        <option value="motivates">启发 motivates</option>
-        <option value="supports">支持 supports</option>
-        <option value="contradicts">反对/不支持 contradicts</option>
-        <option value="depends_on">依赖 depends_on</option>
+        <option value="related">{t("modal.rel.related")}</option>
+        <option value="motivates">{t("modal.rel.motivates")}</option>
+        <option value="supports">{t("modal.rel.supports")}</option>
+        <option value="contradicts">{t("modal.rel.contradicts")}</option>
+        <option value="depends_on">{t("modal.rel.depends_on")}</option>
       </select>
-      <label className="field">原因（一句话，1–500，必填）</label>
-      <textarea value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} style={{ width: "100%" }} placeholder="例：该失败实验的负结果支持本节点的停止条件" />
+      <label className="field">{t("modal.rel.reason.label")}</label>
+      <textarea value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} style={{ width: "100%" }} placeholder={t("modal.rel.reason.ph")} />
       <div className="modal-actions">
-        <button onClick={onClose}>取消</button>
+        <button onClick={onClose}>{t("common.cancel")}</button>
         <button
           className="primary"
           disabled={!target || !reason.trim()}
           onClick={() => onCreate(target, kind, reason.trim())}
         >
-          建立关联
+          {t("modal.rel.create")}
         </button>
       </div>
       <div className="muted" style={{ marginTop: 8, fontSize: 11 }}>
-        新增 supports / contradicts 不会自动改变任何节点状态；状态只能由研究者显式填写。
+        {t("modal.rel.note")}
       </div>
     </Modal>
   );
@@ -1420,58 +1418,57 @@ function AiAccessModal({
   onClose: () => void;
   onToast: (msg: string, kind?: "ok" | "err") => void;
 }) {
+  const t = useT();
   const origin = window.location.origin;
   const block = [
-    `服务器：${origin}（Authorization: Bearer <你的令牌>）`,
-    `项目名称：${project.name}`,
-    `项目 ID：${pid}`,
-    `身份：每条提交的 actor 为令牌名（token_name），无法伪造`,
+    t("ai.line.server", { origin }),
+    t("ai.line.name", { name: project.name }),
+    t("ai.line.id", { pid }),
+    t("ai.line.actor"),
     "",
-    "# 一次性配置（令牌只走环境变量，永不写进文件 / 日志 / 命令行参数）",
+    t("ai.section.setup"),
     `export RESEARCHMAP_BASE_URL="${origin}"`,
-    `export RESEARCHMAP_TOKEN="<你的令牌>"`,
+    t("ai.line.token.export"),
     "",
-    "# 读取当前状态（不改数据）。以下三条都可直接粘贴运行：",
+    t("ai.section.read"),
     `python3 tools/researchmap.py context ${pid}`,
-    "# 聚焦某个节点（节点 ID 见卡片右键「复制节点深链接」末尾的 ?node=，或 graph 输出）：",
+    t("ai.section.focus"),
     `python3 tools/researchmap.py context ${pid} --focus 00000000-0000-0000-0000-000000000000`,
-    "# 按关键词检索（中文子串可用）：",
+    t("ai.section.search"),
     `python3 tools/researchmap.py context ${pid} --q "关键词"`,
     "",
-    "# 提交修改（请求文件必须含完整 request_id + expected_revision；先 --dry-run 校验）",
+    t("ai.section.commit"),
     `python3 tools/researchmap.py commit ${pid} request.json --dry-run`,
     `python3 tools/researchmap.py commit ${pid} request.json`,
     "",
-    "# 409 有四种，处理方式不同（退出码统一为 2，具体看 error.code）：",
-    "#   REVISION_CONFLICT      期间有人提交过，锁的是整个项目的版本、不是单个对象；",
-    "#                          本次一个字节都没写入。重读 context 后显式重写文件",
-    "#                          （新的 expected_revision + 合并后的 operations）；",
-    "#                          409 不留记录，沿用原 request_id 是合法的。",
-    "#   IDEMPOTENCY_KEY_REUSED 该 request_id 已以不同内容成功提交过。要么原字节重放，",
-    "#                          要么换新 request_id，切勿改字段后复用。",
-    "#   DUPLICATE_RELATION     同端点同类型的未归档关联已存在，改用 relation.update/restore。",
-    "#   PAGINATION_STALE       分页途中项目版本变了，放弃游标从头翻。",
-    "# 完整规范：docs/AI_USAGE.md（英文主入口）/ docs/AI_USAGE.zh-CN.md",
+    t("ai.section.409"),
+    t("ai.409.rev1"),
+    t("ai.409.rev2"),
+    t("ai.409.rev3"),
+    t("ai.409.rev4"),
+    t("ai.409.idem1"),
+    t("ai.409.idem2"),
+    t("ai.409.dup"),
+    t("ai.409.pag"),
+    t("ai.footer"),
   ].join("\n");
   return (
-    <Modal title="AI 接入说明" onClose={onClose}>
-      <p className="muted">
-        AI 与浏览器走同一条提交协议，不需要模型 API Key；所有持令牌者属于同一个受信任空间。
-      </p>
+    <Modal title={t("topbar.menu.ai")} onClose={onClose}>
+      <p className="muted">{t("ai.intro")}</p>
       <pre className="aiaccess-pre">{block}</pre>
       <div className="mrow">
         <button
           onClick={() =>
             navigator.clipboard
               .writeText(block)
-              .then(() => onToast("接入信息已复制", "ok"))
-              .catch(() => onToast("复制失败", "err"))
+              .then(() => onToast(t("ai.copied"), "ok"))
+              .catch(() => onToast(t("ai.copy.fail"), "err"))
           }
         >
-          复制接入信息
+          {t("ai.copy")}
         </button>
         <button className="primary" onClick={onClose}>
-          关闭
+          {t("common.close")}
         </button>
       </div>
     </Modal>
@@ -1513,9 +1510,10 @@ function ModalFooter({
   submitLabel: string;
   onSubmit: () => void;
 }) {
+  const t = useT();
   return (
     <div className="mrow">
-      <button onClick={onCancel} disabled={busy}>取消</button>
+      <button onClick={onCancel} disabled={busy}>{t("common.cancel")}</button>
       <button className="primary" disabled={!canSubmit} onClick={onSubmit}>
         {submitLabel}
       </button>
