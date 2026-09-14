@@ -1,0 +1,21 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# JSON / JS / TS / YAML / Markdown / HTML — 2 spaces
+[*.{json,js,ts,tsx,yml,yaml,md,markdown,html}]
+indent_size = 2
+
+# Python — 4 spaces
+[*.py]
+indent_size = 4
+
+# Markdown may rely on two trailing spaces for hard line breaks; do not trim them.
+[*.md]
+trim_trailing_whitespace = false

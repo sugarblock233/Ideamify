@@ -1,0 +1,272 @@
+# ResearchMap CI — real, reproducible verification for every PR and push.
+#
+# This workflow references NO secrets. All tests run with synthetic tokens and
+# scratch databases under /tmp on an ephemeral runner, so every run is
+# isolated from real user data or local machines.
+#
+# Version baseline (kept consistent with the Docker image and local docs):
+#   Node 22   (frontend build, e2e)
+#   Python 3.13 (backend, e2e server)
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: frontend — typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/checkout@v4
+      - name: Set up Node 22
+        uses: actions/setup-node@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Clean install from lockfile
+        run: npm ci
+      - name: Typecheck + production build
+        # `build` runs `tsc --noEmit && vite build` (see frontend/package.json).
+        run: npm run build
+      - name: Unit tests (vitest)
+        run: npm test
+
+  backend:
+    name: backend — clean venv from lockfile, pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        with:
+          python-version: "3.13"
+      - name: Clean venv, install from transitive lock (D02)
+        run: |
+          python -m venv .ci-venv
+          .ci-venv/bin/pip install --quiet --upgrade pip
+          .ci-venv/bin/pip install --quiet -r backend/requirements.lock.txt
+      - name: Run backend tests (scratch DB + synthetic tokens only)
+        working-directory: backend
+        env:
+          RESEARCHMAP_DB: /tmp/rm-ci-backend.db
+          RESEARCHMAP_TOKENS: '{"ci-researcher":"ci-token-0001-aaaa","ci-ai":"ci-token-0001-bbbb"}'
+        run: ../.ci-venv/bin/python -m pytest tests -q
+
+  e2e:
+    name: e2e — browser regression against production-shaped server
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+      - name: Set up Node 22
+        uses: actions/setup-node@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Clean install from lockfile
+        working-directory: frontend
+        run: npm ci
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        with:
+          python-version: "3.13"
+      - name: Backend venv for the e2e server (default E2E_PYTHON path)
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/bin/pip install --quiet --upgrade pip
+          backend/.venv/bin/pip install --quiet -r backend/requirements.lock.txt
+      - name: Install Chromium + system deps
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      # E2E_DB_DIR overrides playwright.config.ts's scratch DB location
+      # (default /tmp/rm-e2e); E2E_PYTHON defaults to ../backend/.venv/bin/python.
+      - name: Run e2e (fresh scratch DB, synonym/server on 127.0.0.1:8021)
+        working-directory: frontend
+        env:
+          E2E_DB_DIR: /tmp/rm-e2e-ci
+        run: npx playwright test
+      - name: Upload Playwright traces/screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        with:
+          name: playwright-e2e-results-${{ github.run_attempt }}
+          path: frontend/test-results/
+          retention-days: 7
+
+  container:
+    name: container — build, boot, auth, SPA fallback
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+      - name: Build image (no push)
+        run: docker build -t researchmap-ci:ci .
+      - name: Start container with a fresh named volume
+        run: |
+          docker run -d --name rm-ci-e2e \
+            -e RESEARCHMAP_TOKENS='{"container":"ci-container-token-01"}' \
+            -v rm-ci-data:/data \
+            -p 127.0.0.1:18099:8000 \
+            researchmap-ci:ci
+      - name: Wait for /healthz
+        run: |
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18099/healthz && exit 0
+            sleep 1
+          done
+          echo "container did not become healthy" >&2
+          exit 1
+      - name: Auth + SPA assertions
+        run: |
+          set -euo pipefail
+          BASE=http://127.0.0.1:18099
+          # healthz is public
+          curl -fsS "$BASE/healthz"
+          # /api without a token -> 401
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/v1/projects")
+          [ "$code" = 401 ]
+          # /api with a token that does not match the config -> 401
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'Authorization: Bearer not-a-configured-token' "$BASE/api/v1/projects")
+          [ "$code" = 401 ]
+          # /api with the configured token -> 200
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'Authorization: Bearer ci-container-token-01' "$BASE/api/v1/projects")
+          [ "$code" = 200 ]
+          # SPA shell at / and unknown app route /p/x fallback (never API JSON/404)
+          curl -fsS "$BASE/" | grep -qi '<!doctype html>'
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/p/fallback-route-check")
+          [ "$code" = 200 ]
+          curl -fsS "$BASE/p/fallback-route-check" | grep -qi '<!doctype html>'
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f rm-ci-e2e >/dev/null 2>&1 || true
+          docker volume rm rm-ci-data >/dev/null 2>&1 || true
+
+  checks:
+    name: repository checks — paths/credentials, links, JSON/YAML validity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        with:
+          python-version: "3.13"
+      - name: Install PyYAML
+        run: python -m pip install --quiet pyyaml
+      # Internal dev material with real host paths is deliberately excluded
+      # (docs/acceptance-2026-09-13/ and the execution plan are carried in
+      # until the owner publishes a sanitized public copy; see B07/G08).
+      - name: No absolute local paths / credential-shaped strings in public files
+        run: |
+          set -uo pipefail
+          PATH_PAT='/Users/[A-Za-z0-9._-]+|/home/[a-z0-9._-]+/|C:[\\/]'
+          CRED_PAT='ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16,}|xox[baprse]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+          hits=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            if grep -nE "$PATH_PAT" "$f" >/dev/null; then
+              echo "absolute local path in: $f"
+              grep -nE "$PATH_PAT" "$f" | head -5 | sed 's/^/    /'
+              hits=$((hits+1))
+            fi
+            if grep -nE "$CRED_PAT" "$f" >/dev/null; then
+              echo "credential-shaped string in: $f"
+              grep -nE "$CRED_PAT" "$f" | head -5 | sed 's/^/    /'
+              hits=$((hits+1))
+            fi
+          done < <(git ls-files \
+            | grep -vE '^docs/acceptance-2026-09-13/' \
+            | grep -vE '^docs/QWEN_EXECUTION_PLAN\.md$')
+          if [ "$hits" -gt 0 ]; then
+            echo "found $hits file(s) with forbidden content" >&2
+            exit 1
+          fi
+          echo "path/credential scan clean"
+      - name: Markdown relative links resolve
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+
+          files = [
+              "README.md",
+              "README.zh-CN.md",
+              "CONTRIBUTING.md",
+              "SECURITY.md",
+              "CODE_OF_CONDUCT.md",
+              "CHANGELOG.md",
+              "AGENTS.md",
+              "docs/SPEC.md",
+              "docs/DECISIONS.md",
+              "docs/AI_USAGE.md",
+          ]
+          files += [str(p) for p in sorted(pathlib.Path(".github").rglob("*.md")) if p.is_file()]
+          files = [f for f in files if pathlib.Path(f).is_file()]
+
+          ref = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+          missing = []
+          checked = 0
+          for f in files:
+              text = pathlib.Path(f).read_text(encoding="utf-8")
+              for m in ref.finditer(text):
+                  target = m.group(1).split("#", 1)[0].strip()
+                  if not target:
+                      continue
+                  if target.startswith(("http://", "https://", "mailto:", "#", "/")):
+                      continue
+                  checked += 1
+                  if not (pathlib.Path(f).parent / target).resolve().exists():
+                      missing.append(f"{f} -> {target}")
+          if missing:
+              print("broken relative links:", file=sys.stderr)
+              print("\n".join(missing), file=sys.stderr)
+              sys.exit(1)
+          print(f"markdown link check OK ({checked} relative links in {len(files)} files)")
+          PY
+      - name: Example JSON parses
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in examples/*.json; do
+            python -m json.tool "$f" >/dev/null
+            echo "OK $f"
+          done
+      - name: YAML files parse
+        run: |
+          set -euo pipefail
+          for f in .github/workflows/ci.yml .github/dependabot.yml \
+                   .github/ISSUE_TEMPLATE/bug_report.yml \
+                   .github/ISSUE_TEMPLATE/feature_request.yml \
+                   .github/ISSUE_TEMPLATE/config.yml compose.yaml; do
+            python -c "import sys, yaml; yaml.safe_load(open(sys.argv[1], encoding='utf-8'))" "$f"
+            echo "OK $f"
+          done

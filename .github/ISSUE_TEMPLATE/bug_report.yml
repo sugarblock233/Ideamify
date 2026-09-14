@@ -1,0 +1,113 @@
+name: Bug report
+description: "Report broken behavior. Include version, steps, and what you expected. / 报告缺陷：请附版本、步骤与预期结果。"
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you post:**
+        - Do NOT paste real research data, experiment logs, or access tokens.
+          Use synthetic values only.（请不要粘贴真实研究数据、实验日志或访问令牌，只使用合成值。）
+        - For suspected security issues (auth bypass, data exposure), read
+          `SECURITY.md` at the repo root first and do not file a public issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Project version tag, or the Git short SHA if you run from source (e.g. `1c5677e`). (版本号或源码提交 SHA，如 `1c5677e`)
+      placeholder: e.g. v0.2.1 or 1c5677e
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      description: How is the running instance started? (启动方式)
+      options:
+        - docker compose
+        - local dev servers (Vite + uvicorn)
+        - container image (built manually)
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Host OS and major version, e.g. `macOS 15`, `Ubuntu 24.04`, `Windows 11`.
+      placeholder: e.g. macOS 15.5
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (UI bugs only)
+      description: Browser and version for interface bugs; leave `n/a` for CLI/API bugs. (界面缺陷必填；CLI/API 缺陷可填 n/a)
+      placeholder: e.g. Chrome 126 / Firefox 127
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered, minimal steps from a fresh browser/terminal. (从全新会话出发、可复现的最少步骤，编号列出。)
+      placeholder: |
+        1. Log in with a personal token
+        2. Open project X, select node Y
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. Quote exact error text where possible. (实际发生了什么，尽量附上精确报错。)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs / screenshots
+      description: >
+        Attach screenshots or API request/response pairs. Remove any token
+        values, hostnames, and real research content before attaching.
+        (可附截图或 API 请求/响应；提交前去除令牌值、主机名与真实研究内容。)
+      placeholder: |
+        # Error from the browser console or CLI stderr
+        ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal synthetic repro
+      description: >
+        A synthetic research example (fake node titles/summaries are fine) that
+        reproduces the problem, or the JSON commit file used. Do not attach
+        real experiment records. (能复现问题的合成研究示例或提交的 JSON 文件；请勿附真实实验记录。)
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+    validations:
+      required: false

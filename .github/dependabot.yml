@@ -1,0 +1,32 @@
+# Dependabot — weekly checks, small PR batch, all four ecosystems.
+#
+# Notes:
+# - /backend pip updates touch requirements.txt (the human-maintained base).
+#   backend/requirements.lock.txt is the transitive lock — regenerate it in a
+#   clean venv (`pip install -r requirements.txt && pip freeze > requirements.lock.txt`)
+#   after a dep update that changes direct pins.
+# - /frontend npm updates go through frontend/package-lock.json (npm ci in CI).
+# - docker updates track the FROM bases in the root Dockerfile.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+open-pull-requests-limit: 5

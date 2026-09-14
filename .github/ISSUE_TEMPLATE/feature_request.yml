@@ -1,0 +1,48 @@
+name: Feature request
+description: "Suggest an improvement. Describe the research problem it answers and the target behavior. / 功能建议：请说明它解决的研究问题与目标行为。"
+title: "[feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Scope reminder:** this project deliberately keeps a small boundary —
+        no built-in LLM, no automated research execution, no multi-tenant
+        platform. See "What it deliberately does not do" in the README and
+        `docs/SPEC.md` §0. Suggestions outside that boundary are welcome as
+        discussion, but will usually be parked.
+        注意项目边界：无内置 LLM、无自动科研执行、非多租户平台（见 README 与
+        `docs/SPEC.md` §0）；边界外的建议欢迎作为讨论提出，但通常会被搁置。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Research problem
+      description: What real pain in your research workflow does this address? Who runs into it, and how often? (它解决研究流程中什么真实痛点？谁会遇到、多频繁？)
+    validations:
+      required: true
+
+  - type: textarea
+    id: target
+    attributes:
+      label: Target behavior
+      description: What should the user (human or AI) be able to do afterwards? Concrete, observable. (之后用户/ AI 应当能做什么？具体、可观察。)
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Anything you already tried or considered, including workarounds. (已尝试或考虑过的替代方案，包括权宜之计。)
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: In-scope self-check
+      description: Does this stay within the documented boundaries (no LLM, no execution, single-researcher trusted circle)? Why is it worth the maintainer's time? (它是否保持在已记录的边界内？为什么值得维护者投入时间？)
+    validations:
+      required: false
