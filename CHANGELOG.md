@@ -207,8 +207,13 @@ live in `docs/implementation-results.md`.
 - License (MIT, `sugarblock233`), security contact (GitHub Issues/
   Discussions), and the final project name (Ideamify) are settled and applied.
 - Commits in this batch carry no `Co-Authored-By` trailer, per `AGENTS.md`.
-  The 15 pre-existing commits that do are left untouched; rewriting shared
-  history is the owner's decision.
+  The owner has since decided to extend that to the 15 pre-existing commits
+  that did, including the already-pushed initial one; all 15 trailers were
+  stripped with `git filter-branch --msg-filter` and the rewritten `main` was
+  force-pushed. Only commit messages changed — every tree hash is identical
+  and the messages are byte-for-byte the same apart from the removed trailer —
+  but all 33 commit SHAs changed, so the commit references in this changelog
+  and in `docs/implementation-results.md` were remapped.
 
 #### Security
 
