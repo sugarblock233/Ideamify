@@ -33,10 +33,10 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout
-        # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
-        uses: actions/checkout@v4
+
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Node 22
-        uses: actions/setup-node@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
@@ -55,9 +55,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       - name: Clean venv, install from transitive lock (D02)
@@ -78,9 +78,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Node 22
-        uses: actions/setup-node@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
@@ -92,7 +92,7 @@ jobs:
         working-directory: frontend
         run: npm run build
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       - name: Backend venv for the e2e server (default E2E_PYTHON path)
@@ -112,7 +112,7 @@ jobs:
         run: npx playwright test
       - name: Upload Playwright traces/screenshots on failure
         if: failure()
-        uses: actions/upload-artifact@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-e2e-results-${{ github.run_attempt }}
           path: frontend/test-results/
@@ -124,7 +124,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build image (no push)
         run: docker build -t researchmap-ci:ci .
       - name: Start container with a fresh named volume
@@ -176,9 +176,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5 # TODO(pin): replace tag with the verified 40-char commit SHA on next maintenance.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       - name: Install PyYAML
@@ -191,17 +191,19 @@ jobs:
           set -uo pipefail
           PATH_PAT='/Users/[A-Za-z0-9._-]+|/home/[a-z0-9._-]+/|C:[\\/]'
           CRED_PAT='ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16,}|xox[baprse]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+          # Report WHERE, never WHAT: this log is public on a public repo, so
+          # echoing the matched text would republish the very secret (or the
+          # local username) the scan exists to keep out.
+          locate() { grep -nE "$2" "$1" | cut -d: -f1 | head -5 | paste -sd, -; }
           hits=0
           while IFS= read -r f; do
             [ -f "$f" ] || continue
-            if grep -nE "$PATH_PAT" "$f" >/dev/null; then
-              echo "absolute local path in: $f"
-              grep -nE "$PATH_PAT" "$f" | head -5 | sed 's/^/    /'
+            if grep -qE "$PATH_PAT" "$f"; then
+              echo "absolute local path in: $f (lines $(locate "$f" "$PATH_PAT"))"
               hits=$((hits+1))
             fi
-            if grep -nE "$CRED_PAT" "$f" >/dev/null; then
-              echo "credential-shaped string in: $f"
-              grep -nE "$CRED_PAT" "$f" | head -5 | sed 's/^/    /'
+            if grep -qE "$CRED_PAT" "$f"; then
+              echo "credential-shaped string in: $f (lines $(locate "$f" "$CRED_PAT"))"
               hits=$((hits+1))
             fi
           done < <(git ls-files \
@@ -228,6 +230,7 @@ jobs:
               "docs/SPEC.md",
               "docs/DECISIONS.md",
               "docs/AI_USAGE.md",
+              "docs/AI_USAGE.zh-CN.md",
           ]
           files += [str(p) for p in sorted(pathlib.Path(".github").rglob("*.md")) if p.is_file()]
           files = [f for f in files if pathlib.Path(f).is_file()]
