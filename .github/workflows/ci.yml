@@ -183,9 +183,6 @@ jobs:
           python-version: "3.13"
       - name: Install PyYAML
         run: python -m pip install --quiet pyyaml
-      # Internal dev material with real host paths is deliberately excluded
-      # (docs/acceptance-2026-09-13/ and the execution plan are carried in
-      # until the owner publishes a sanitized public copy; see B07/G08).
       - name: No absolute local paths / credential-shaped strings in public files
         run: |
           set -uo pipefail
@@ -206,9 +203,7 @@ jobs:
               echo "credential-shaped string in: $f (lines $(locate "$f" "$CRED_PAT"))"
               hits=$((hits+1))
             fi
-          done < <(git ls-files \
-            | grep -vE '^docs/acceptance-2026-09-13/' \
-            | grep -vE '^docs/QWEN_EXECUTION_PLAN\.md$')
+          done < <(git ls-files)
           if [ "$hits" -gt 0 ]; then
             echo "found $hits file(s) with forbidden content" >&2
             exit 1
@@ -217,23 +212,11 @@ jobs:
       - name: Markdown relative links resolve
         run: |
           python - <<'PY'
-          import pathlib, re, sys
+          import pathlib, re, subprocess, sys
 
-          files = [
-              "README.md",
-              "README.zh-CN.md",
-              "CONTRIBUTING.md",
-              "SECURITY.md",
-              "CODE_OF_CONDUCT.md",
-              "CHANGELOG.md",
-              "AGENTS.md",
-              "docs/SPEC.md",
-              "docs/DECISIONS.md",
-              "docs/AI_USAGE.md",
-              "docs/AI_USAGE.zh-CN.md",
-          ]
-          files += [str(p) for p in sorted(pathlib.Path(".github").rglob("*.md")) if p.is_file()]
-          files = [f for f in files if pathlib.Path(f).is_file()]
+          files = [p for p in subprocess.check_output(
+              ["git", "ls-files", "-z"], text=True
+          ).split("\0") if p.endswith(".md")]
 
           ref = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
           missing = []

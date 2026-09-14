@@ -20,13 +20,13 @@ defined in `docs/SPEC.md`; do not drift from them silently.
 - `frontend/e2e/` — Playwright smoke (production-shaped server, scratch DB)
 - `tools/researchmap.py` — AI/human CLI (HTTP only) · `tools/backup.py` — backup/restore
 - `examples/` — synthetic commit templates · `scripts/stress_test.py` — load script
-- `docs/` — SPEC, DECISIONS, AI_USAGE (protocol), plan/results docs
+- `docs/` — user guides, SPEC, DECISIONS, AI_USAGE and historical archive
 
 ## Commands (real, from this repo)
 
 ```bash
 # backend (dev)
-cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.lock.txt
 RESEARCHMAP_DB=/tmp/rm-dev.db RESEARCHMAP_TOKENS='{"dev":"dev-token-0001-aaaa"}' \
   .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 
@@ -38,7 +38,7 @@ cd frontend && npm ci
 npm run dev                      # :5173, proxies /api to :8000
 npm test                         # vitest
 npm run build                    # tsc --noEmit + vite build
-npm run build && npx playwright test   # e2e (uses E2E_DB_DIR, default /tmp/rm-e2e)
+npm run build && npx playwright test   # e2e (fresh temporary DB; E2E_DB_DIR/E2E_PORT overrides)
 
 # container
 cp .env.example .env && docker compose up -d --build

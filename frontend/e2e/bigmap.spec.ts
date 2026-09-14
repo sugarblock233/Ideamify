@@ -6,7 +6,7 @@
  *
  * 本用例用一棵"路线多、每条路线子节点也多"的合成树复现那个几何条件，然后断言
  * 首屏（无已存视图）落在可读缩放上、根节点与至少一条一级路线同时在视口内，
- * 并且平移能看到其余路线。产出的截图入 docs/evidence/ 作为证据。
+ * 并且平移能看到其余路线。产出的截图入 test-results/evidence/，不改动历史证据。
  *
  * 运行：npm run build && npx playwright test e2e/bigmap.spec.ts */
 
@@ -16,9 +16,9 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 
 const TOKEN = "e2e-test-token-0001";
-const BASE = "http://127.0.0.1:8021";
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT ?? 8021}`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const EVIDENCE_DIR = path.join(HERE, "..", "..", "docs", "evidence");
+const EVIDENCE_DIR = path.join(HERE, "..", "test-results", "evidence");
 
 /** 卡片宽 280px；0.7 倍是本 app 统一的"可读"缩放（Canvas.READABLE_ZOOM）。 */
 const MIN_READABLE_CARD_PX = 180;

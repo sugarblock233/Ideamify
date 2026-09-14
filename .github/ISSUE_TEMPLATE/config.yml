@@ -1,19 +1,8 @@
-# GitHub issue configuration
-#
-# Blank issues are disabled: report structure matters (version, steps,
-# sanitized logs), and security reports are deliberately NOT public issues.
 blank_issues_enabled: false
-
 contact_links:
+  - name: Questions / 使用交流
+    url: https://github.com/sugarblock233/Ideamify/discussions
+    about: Ask about setup, research workflows or AI integration in English or Chinese.
   - name: Security disclosure
     url: https://github.com/sugarblock233/Ideamify/blob/main/SECURITY.md
-    about: >-
-      Read SECURITY.md before reporting vulnerabilities. Prefer GitHub's
-      private vulnerability reporting if it is enabled for this repository;
-      do not open a public issue for auth/data-exposure problems.
-  - name: Questions / other
-    url: https://github.com/sugarblock233/Ideamify/issues/new
-    about: >-
-      Opening an issue asks you to pick a template; choose the closest one
-      (bug or feature) for questions about the app, the AI protocol, or the
-      CLI. English or Chinese are both fine.
+    about: Read the reporting instructions before sharing vulnerability details.

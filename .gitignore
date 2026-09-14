@@ -17,8 +17,6 @@ config/
 
 # --- SQLite files: loose databases and WAL/SHM sidecars ---
 # Covers scratch databases and any accidentally created local copies.
-# Acceptance assets under docs/acceptance-2026-09-13/ are .png/.json/.txt and
-# are NOT matched by these patterns.
 *.db
 *.db-wal
 *.db-shm
@@ -43,3 +41,6 @@ playwright-report/
 # --- Misc ---
 *.log
 .DS_Store
+
+# Private local acceptance notes; public history belongs in docs/archive/.
+docs/acceptance-*/

@@ -1,54 +1,27 @@
-[English](README.md) | [简体中文](README.zh-CN.md)
-
 # Ideamify
 
-> **Ideamify** 是项目名；**ResearchMap** 是运行中的应用、规格与 CLI 的名称。
-> 两个名字都已定稿，各自有意保留。
+[English](README.md) · [开始使用](docs/GETTING_STARTED.zh-CN.md) · [AI 协作指南](docs/AI_USAGE.zh-CN.md) · [交流讨论](https://github.com/sugarblock233/Ideamify/discussions)
 
-**一句话定位**：部署在你自己服务器上的轻量 Web 应用，让一位研究者和他信任的
-若干 AI 工具**共同维护同一份科研演化地图**——从问题分出路线，记录尝试、观察、
-成功、失败与决定；过去的探索（尤其负结果与其成立条件）在换 AI、换设备之后
-依然可继承。
+[![CI](https://github.com/sugarblock233/Ideamify/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sugarblock233/Ideamify/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-适合谁：单个研究者（连同其 AI 辅助终端），想要一份持久的、可审计的、人 + AI
-共享的研究记忆，并且部署在自己的服务器上。本项目处于**预发布（0.x）**
-阶段：修复勤快但无稳定性承诺。本项目以 [MIT 许可证](LICENSE) 发布。
+把科研的演进过程留在一张地图里：提出过什么问题、尝试过哪些路线、观察到什么、为什么决定下一步这样做。你的 AI 工具可以读写同一份记录，新会话也能接着上次的研究继续。
 
-![ResearchMap 主树画布——合成演示项目：根节点、一级路线、节点状态，以及选中节点的跨分支关联（合成演示数据）](docs/images/workspace-1440x900.png)
-_主树画布，1440×900，含跨分支关联。**截图显示的是合成演示数据**，不是真实研究结果。_
+![两条研究路线与关联发现的工作区；全部内容为合成演示数据。](docs/images/workspace-1440x900.png)
 
-![ResearchMap 节点详情阅读视图——标题、状态、适用范围、发现、决定与证据条目（合成演示数据）](docs/images/detail-panel-1280x800.png)
-_节点详情阅读视图，1280×800（同为合成演示数据）。_
+## 可以用它做什么
 
-## 核心功能
+- 用树状结构整理问题、想法、尝试和发现。
+- 记录观察、证据和决定，保留负结果及结论成立的条件。
+- 连接不同分支的相关工作，查看每次修改的内容和作者。
+- 让外部 AI 通过 HTTP API 或 Python CLI 接续研究，版本检查会阻止会话之间静默覆盖记录。
+- 用 Docker 在本机运行，数据保存在持久化的 SQLite 卷中。
 
-- **主树 + 跨分支关联。** 每个节点有且只有一个父节点（布局轴）；独立的关联层
-  在任意分支之间连线（相关 / 启发 / 支持 / 矛盾 / 依赖），连线按需显示，
-  默认不画线。
-- **研究状态与证据门槛。** 六种状态，从 `unexplored` 到 `supported` /
-  `not_supported`；红/绿**强制**填写适用条件、发现、决定，并至少一条证据——
-  由后端校验。红色是「当前条件下不支持」，不是永久证伪。
-- **提交历史即审计日志。** 每次变更是一个原子、带作者身份的提交，含
-  before/after 差异；任何人可查谁在何时改了什么、为什么，旧版本始终可读。
-- **外部 AI 走 API 与 CLI。** 无内置模型：外部 AI 读取预算化的 `context`
-  端点，以小增量幂等提交写入，带乐观版本控制（`request_id` +
-  `expected_revision`，409 冲突语义）。`tools/researchmap.py` 是只讲 HTTP
-  的薄 CLI。
-- **导出与备份。** 每项目完整 JSON 导出；基于 SQLite 在线备份的离线
-  backup/verify/restore 工具（`tools/backup.py`）。
+当前界面为中文，显示名称是 **ResearchMap**。Ideamify 是仓库名，CLI 和 `RESEARCHMAP_*` 配置沿用 ResearchMap 名称。应用本身不调用模型，也不执行实验，适合一位研究者和其信任的 AI 工具共同使用。
 
-## 明确不做
+## 在本机启动
 
-- **无内置 LLM**——应用里不存在任何模型调用，也不会去使用你的模型 Key。
-- **无自动科研执行**——不做训练/GPU/Slurm 管理、自动读论文、实验编排。
-- **模型 API Key 非必需。** 全部核心功能不带 Key 也能用。
-- **非多租户。** 不是公开平台：只服务一位研究者的信任圈。
-- 同样不在范围内：自由白板、向量/图数据库、多人实时光标、MCP 服务、
-  专用移动端布局。完整边界见 [`docs/SPEC.md`](docs/SPEC.md) §0。
-
-## 快速开始
-
-前置：装有 Docker（含 Compose 插件）的机器。
+需要 Git 和带 Compose 的 Docker。在终端执行：
 
 ```bash
 git clone https://github.com/sugarblock233/Ideamify.git
@@ -56,188 +29,27 @@ cd Ideamify
 cp .env.example .env
 ```
 
-编辑 `.env`——设置**两个临时/个人令牌**，各 ≥12 个字符且互不相同（令牌
-「名字」会成为提交记录里的 actor 身份）：
-
-```dotenv
-RESEARCHMAP_TOKENS={"researcher":"换成研究者的强令牌-0001","ai-one":"换成AI终端的强令牌-0002"}
-RESEARCHMAP_PORT=8000
-```
-
-然后：
+编辑 `.env`，把两个令牌占位值换成**不同的长随机值**。可执行两次 `openssl rand -hex 24` 生成。保留 `researcher`、`ai-one` 这两个名字或自行命名；名字会出现在修改历史中。每个有效令牌都能读写这个实例中的所有项目。
 
 ```bash
 docker compose up -d --build
 ```
 
-打开 **http://127.0.0.1:8000/**，用研究者令牌登录。从全新数据库开始，可以
-完全在浏览器里：登录 → 创建第一个项目 → 添加一级路线与子节点 → 保存 →
-刷新 → 重新登录，内容一致。
+打开 **http://127.0.0.1:8000/**，输入研究者令牌，创建第一个项目。点击 **+ 一级路线** 添加研究路线，再选中节点，通过 **+ 子节点** 记录尝试或后续想法。
 
-### 关键配置
+接下来按[第一轮科研记录](docs/GETTING_STARTED.zh-CN.md)走一遍，包括如何把记录交给 AI 接续。
 
-| 变量 | 含义 |
-| --- | --- |
-| `RESEARCHMAP_TOKENS` | 内联 JSON（或文件路径），映射**名字 → bearer 令牌**。名字就是提交记录里的 actor 身份。令牌请按该实例的根凭据对待——见 [SECURITY.md](SECURITY.md)。 |
-| `RESEARCHMAP_PORT` | 宿主机端口（默认 `8000`）。 |
+## 日常使用
 
-- **默认仅回环。** Compose 发布 `127.0.0.1:$RESEARCHMAP_PORT:8000`——只有
-  宿主机可访问。远程访问由部署者自行配置（受保护网络 / HTTPS 反向代理）；
-  本项目不会改动你的 SSH、防火墙或隧道。
-- **数据位置。** 全部数据在卷 `researchmap-data` 上的单个 SQLite 文件
-  （`/data/researchmap.db`）。重启、重建容器不应清空数据。
-- **刷新需重新认证。** 令牌只存于浏览器页面内存，刷新页面即退出登录——
-  v0.1 有意如此。
-- **导出与备份。** 对一个普通 SQLite 文件（开发检出，或已经拷出来的副本）：
+- **离开前保存。** 节点编辑需要手动保存。整页刷新后需重新登录，令牌只保存在页面内存中。
+- **AI 写入后**，点击应用内的 **刷新** 或 **载入更新**。如果双方修改了同一个字段，先核对冲突再保存草稿。
+- **定期备份。** 重启、重建容器会保留 Compose 数据卷。按[备份、恢复与升级指南](docs/OPERATIONS.zh-CN.md)保护记录。证据路径引用的外部文件还需要单独备份。
 
-  ```bash
-  python3 tools/backup.py backup  --db <db文件> --out ./backup/ --json
-  python3 tools/backup.py verify  ./backup/researchmap-<ts>.db
-  python3 tools/backup.py restore --src <备份> --dst <目标> --server-stopped --yes
-  ```
+v0.1 已进入个人使用和反馈阶段。已发布的 `v0.1.0` 标签是早期版本，`main` 还包含之后的收尾修复，具体见[更新日志](CHANGELOG.md)。后续根据真实使用中的问题迭代。
 
-  备份不含令牌配置，也不包含证据 path 所指向的外部文件；备份副本请另存到
-  其他存储位置。
+## 项目资源
 
-- **备份正在运行的容器。** 库是 WAL 模式，**实时数据可能还在
-  `/data/researchmap.db-wal` 里**：只拷 `researchmap.db` 有可能拿到一个 4 KB、
-  一个表都没有的文件。请走 SQLite 在线备份（`tools/backup.py`，对 WAL 安全），
-  把仓库的 `tools/` 只读挂进一次性容器执行：
-
-  ```bash
-  export RESEARCHMAP_TOKENS='{"researcher":"…"}'   # compose 需要插值这个变量
-
-  # 1) 服务不用停：在线备份
-  docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
-    python /tools/backup.py backup --db /data/researchmap.db --out /data/backups
-  docker compose cp researchmap:/data/backups/researchmap-<ts>.db ./backup/
-  python3 tools/backup.py verify ./backup/researchmap-<ts>.db   # 打印计数；缺表即失败
-
-  # 2) 恢复：先停下写入方（v0.1 不做在线热替换）
-  docker compose stop
-  docker compose cp ./backup/researchmap-<ts>.db researchmap:/data/restore-source.db
-  docker compose run --rm -v "$PWD/tools:/tools:ro" researchmap \
-    python /tools/backup.py restore --src /data/restore-source.db \
-      --dst /data/researchmap.db --server-stopped --yes
-  docker compose start
-  ```
-
-  备份产物是**单文件**（已转成 `journal_mode=DELETE`），在任何机器上直接
-  `verify`/`show` 都行。`restore` 会把被替换的库留档为
-  `/data/researchmap.db.pre-restore-<ts>`，并删除残留的 `-wal`/`-shm`——留着
-  它们会让 SQLite 在下次打开时把旧数据回放到恢复后的库上。重启后请重新加载
-  UI 核对版本号。对缺表的文件 `verify` 会**失败**（非零退出、打印 `缺表`）
-  而不是给它背书，所以 `docker cp` 这类误操作是当场报错而不是静默丢数据。
-
-## 外部 AI 如何读写这份地图
-
-完整协议：[`docs/AI_USAGE.md`](docs/AI_USAGE.md)。可直接复制的 commit
-模板：[`examples/`](examples/)。最小闭环如下，凭证只走环境变量——
-令牌绝不出现在命令行、示例与日志里：
-
-```bash
-export RESEARCHMAP_BASE_URL=http://127.0.0.1:8000
-export RESEARCHMAP_TOKEN="<你的访问令牌>"     # AI 终端用 ai-one 的令牌
-
-python3 tools/researchmap.py health
-python3 tools/researchmap.py context <project_id>           # 预算化的世界状态
-python3 tools/researchmap.py commit <project_id> delta.json --dry-run
-python3 tools/researchmap.py commit <project_id> delta.json
-```
-
-`delta.json` 是一个完整提交请求：自己生成的 `request_id`（UUID）+ 从项目
-读到的 `expected_revision`，再加 operations。可复制
-[`examples/skeleton.json`](examples/skeleton.json) 修改。
-
-冲突处理（精确语义）：
-
-- **`409 REVISION_CONFLICT`——本次提交未被记录。** 重新读取 context，
-  然后**沿用同一个 `request_id`**，用新的 `expected_revision` 重发（错误
-  响应里的 `details.current_revision` 会告诉你）。
-- **`409 IDEMPOTENCY_KEY_REUSED`**——同一个 `request_id` 已用**不同内容**
-  提交过。请换一个全新 UUID。内容完全相同的重复发送是安全的幂等重放
-  （`already_committed: true`）。
-
-## 开发与测试
-
-基线工具链：**Python 3.13、Node 22**（与 Docker 镜像和 CI 一致）。
-
-```bash
-# 后端
-cd backend
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-RESEARCHMAP_DB=/tmp/rm-dev.db \
-RESEARCHMAP_TOKENS='{"dev-researcher":"dev-token-0001","dev-ai":"dev-ai-token-0001"}' \
-  .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-
-# 前端（另一个终端）
-cd frontend
-npm ci && npm run dev            # :5173，/api 代理到 :8000
-npm test                         # vitest 单测
-npm run build                    # tsc --noEmit + 生产构建
-npm run build && npx playwright test    # 浏览器 e2e（生产形同源服务）
-
-# 后端测试
-cd backend && .venv/bin/python -m pytest tests -q
-
-# 可选合成压测（自带 scratch 服务，安全）
-python3 scripts/stress_test.py
-```
-
-开发/测试请使用 scratch 数据库（`/tmp/...`），绝不使用 `data/` 或部署卷。
-`backend/requirements.lock.txt` 是 Docker 与 CI 使用的完整传递依赖锁；
-开发 venv 使用 `requirements.txt`。
-
-## 文档导航
-
-| 文件 | 内容 |
-| --- | --- |
-| [`docs/SPEC.md`](docs/SPEC.md) | 产品与技术规格——产品语义的权威来源 |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 规格未规定处的实现决策 |
-| [`docs/AI_USAGE.md`](docs/AI_USAGE.md) | 外部 AI 协议（读取 → dry-run → 提交 → 冲突 → 交接） |
-| [`docs/QWEN_EXECUTION_PLAN.md`](docs/QWEN_EXECUTION_PLAN.md) | 当前修复/治理批次的执行计划（A/B/D/G 项；G10 = 所有者决定项） |
-| [`docs/implementation-results.md`](docs/implementation-results.md) | 逐项执行证据与剩余限制 |
-| [`examples/`](examples/) | 明确标注 synthetic 的提交请求模板 |
-| [`scripts/`](scripts/) | 压测脚本 |
-
-> 注意：`docs/QWEN_EXECUTION_PLAN.md` 与 `docs/acceptance-2026-09-13/`
-> 暂含本地开发路径；公开前会先出脱敏版本。
-
-## 贡献、反馈与支持
-
-- [CONTRIBUTING.md](CONTRIBUTING.md)——开发安装、提交/PR 约定、测试矩阵、
-  语言政策、数据与凭证规则。
-- [AGENTS.md](AGENTS.md)——AI agent 在本仓库的操作规则。
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)——参与规范。
-- Issue：使用提供的模板（英文或中文均可）。安全相关请走
-  [SECURITY.md](SECURITY.md)，不要开公开 Issue。
-- 无邮件列表/IRC：单维护者项目，issue 与 Release notes 是主要渠道。
-
-## 已知限制（诚实清单）
-
-- **预发布 0.x**：API/CLI/schema 可能变化，见 [CHANGELOG.md](CHANGELOG.md)
-  的版本说明。
-- **远端 CI 尚未经过运行**：`.github/workflows/ci.yml` 已配置并与本地工具链
-  对齐，但截至本提交尚未在 GitHub 上执行过。
-- **容器路径已在本机验证，但尚未在 CI 里跑过**：镜像本机构建并运行通过
-  （仅回环发布、`/healthz`、令牌闸门、SPA 深链接回退、备份→恢复演练；见
-  `docs/implementation-results.md` §2 的 D01–D03），但 container CI job 尚未在
-  GitHub 上执行过，Windows 11 / podman 也未验证。
-- 本地文档含路径问题（见上文导航注记）。
-
-## 路线图（已记录的暂缓项）
-
-以下不承诺、也不构成 v0.2 计划；仅把项目已记录的暂缓清单原文保留在此，
-防止范围悄悄扩张（`docs/QWEN_EXECUTION_PLAN.md` §10）。v0.2 的具体想法
-待所有者排定优先级后再补充。
-
-- 明确不做：自动发布 npm/PyPI 包、复杂分支模型、CLA 系统、维护者组织权限、
-  自动关闭 Issue 的机器人、自动合并全部依赖升级、GitHub Pages 文档站、
-  公开在线演示站、付费代码质量平台、全量 UI 国际化、CITATION.cff/DOI 自动
-  发布、复杂自动发版或多平台镜像矩阵。
-
-## License
-
-[MIT](LICENSE) —— Copyright (c) 2026 sugarblock233。
-
-仓库内的截图与示例数据均为合成数据，不是真实研究结果，也不构成任何结论。
+- [文档目录](docs/README.md)：使用指南、AI 协议和技术设计
+- [参与贡献](CONTRIBUTING.md)：开发环境、检查和 Pull Request 约定
+- 用中文或英文[报告问题](https://github.com/sugarblock233/Ideamify/issues/new?template=bug_report.yml)、[提问交流](https://github.com/sugarblock233/Ideamify/discussions)
+- [安全说明](SECURITY.md) · [行为准则](CODE_OF_CONDUCT.md) · [MIT 许可证](LICENSE)

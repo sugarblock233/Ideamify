@@ -5,8 +5,8 @@
  *   workspace-1440x900.png  —— 主树画布 + 选中节点的跨分支关联（1440×900）
  *   detail-panel-1280x800.png —— 节点详情阅读视图（1280×800，A09 单行顶栏）
  *
- * 运行：npm run build && npx playwright test e2e/screenshots.spec.ts
- * （截图产物会被 git 跟踪；改 UI 后重跑本文件即可刷新 README 图片）。 */
+ * 运行：npm run build && UPDATE_DOC_SCREENSHOTS=1 npx playwright test e2e/screenshots.spec.ts
+ * （只有显式设置 UPDATE_DOC_SCREENSHOTS=1 才更新 README 图片；默认写入 test-results/）。 */
 
 import { mkdirSync } from "node:fs";
 import path from "node:path";
@@ -14,9 +14,11 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 
 const TOKEN = "e2e-test-token-0001";
-const BASE = "http://127.0.0.1:8021";
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT ?? 8021}`;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const IMG_DIR = path.join(HERE, "..", "..", "docs", "images");
+const IMG_DIR = (process.env.UPDATE_DOC_SCREENSHOTS === "1"
+  ? path.join(HERE, "..", "..", "docs", "images")
+  : path.join(HERE, "..", "test-results", "screenshots"));
 
 async function api(page, method: string, path: string, body?: unknown) {
   const res = await page.request.fetch(`${BASE}${path}`, {
@@ -129,6 +131,9 @@ test("截图 1：主树画布 + 跨分支关联（1440×900）", async ({ page }
   await page.locator(".rm-card", { hasText: "5% Mg · 125 ℃ 梯度" }).first().click();
   await expect(page.locator(".react-flow__edge")).toHaveCount(7, { timeout: 10_000 });
 
+  // A supported result must look supported in both the card and details.
+  await expect(page.locator("h2 .status-pill")).toHaveCSS("color", "rgb(46, 139, 70)");
+
   // ⋯ 菜单 → 适应当前图（把六张卡 + 关系线收进视口）
   // 回归断言：第一次点击就打开（未守住的 document 关闭监听曾因开口那次
   // 点击自身把菜单立刻关掉——真实用户表现为"首点不响应"）。
@@ -163,6 +168,7 @@ test("截图 2：节点详情阅读视图（1280×800，单行顶栏）", async 
   await expect(page.locator("h2", { hasText: "成核过早" }).first()).toBeVisible(
     { timeout: 10_000 },
   );
+  await expect(page.locator("h2 .status-pill")).toHaveCSS("color", "rgb(195, 58, 46)");
   await expect(page.locator(".readsec-body", { hasText: "41–88%" }).first())
     .toBeVisible();
   await expect(page.locator(".evid-card").first()).toBeVisible();

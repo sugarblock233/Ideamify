@@ -7,7 +7,7 @@
 import { expect, test } from "@playwright/test";
 
 const TOKEN = "e2e-test-token-0001";
-const BASE = "http://127.0.0.1:8021";
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT ?? 8021}`;
 
 async function api(page, method: string, path: string, body?: unknown) {
   const res = await page.request.fetch(`${BASE}${path}`, {

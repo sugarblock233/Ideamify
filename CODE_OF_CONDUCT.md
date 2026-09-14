@@ -13,7 +13,7 @@ for everyone.
 - **No harassment, discrimination, or hateful content** in any form — in
   code, comments, commit messages, issue bodies, PR descriptions, or attached
   data.
-- **Keep real research data out.** See the privacy batch in
+- **Keep real research data out.** See the data and security guidance in
   `CONTRIBUTING.md`: tokens, private experiments, student data, institutional
   reports do not belong in the repo. If you see posted sensitive content,
   report it per "Reporting" below rather than quoting it further.
@@ -29,9 +29,9 @@ here.
 
 Report conduct violations, or anything you want handled privately (including
 sensitive or security-adjacent content, which belongs in `SECURITY.md`), to
-the maintainer directly — via a sensitive GitHub issue or the contact routes
-documented in `SECURITY.md`. Reports are read seriously and do not need to
-match any format.
+the maintainer using the contact process in [SECURITY.md](SECURITY.md).
+GitHub issues and discussions are public: request a private channel there
+without posting confidential details. Reports do not need to match a format.
 
 ## Enforcement
 

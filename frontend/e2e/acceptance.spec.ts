@@ -2,9 +2,7 @@
  *
  *   E2E_DB_DIR=$(mktemp -d) npx playwright test e2e/acceptance.spec.ts
  *
- * 共享套件跑在 /tmp/rm-e2e 上，跨运行累积项目；A01 断言"当前 0 个项目"，
- * 若数据库不空则整用例 skip（提示用新库单跑），绝不当"已验证"。
- * CI（每次全新 /tmp）中本文件按字母序最先执行，能为 A01 提供真实浏览器证据。
+ * 默认每次运行创建独立临时数据库。
  *
  * A01：全新空库 → 令牌闸门 → 浏览器内创建首个项目 → 两条一级路线（第二条为
  *      红色尝试，走 A06 的必填证据闸口一次成功）→ 子节点 → 编辑并保存 →
@@ -17,7 +15,7 @@ import { expect, test } from "@playwright/test";
 
 const TOKEN = "e2e-test-token-0001";
 const OTHER_TOKEN = "e2e-other-token-0001";
-const BASE = "http://127.0.0.1:8021";
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT ?? 8021}`;
 
 async function api(page, method: string, path: string, body?: unknown, token: string = TOKEN) {
   const res = await page.request.fetch(`${BASE}${path}`, {
@@ -134,11 +132,9 @@ test("A01 空数据库：浏览器完成 登录→建项目→两条一级路线
   const redFull = (await api(page, "GET", `/api/v1/projects/${pid}/nodes/${red.id}`)).json;
   expect(redFull.evidence).toHaveLength(1);
 
-  // ---- 子节点：甲的右键菜单 → 新增子节点 ----
-  await page.locator(".rm-card", { hasText: "A01 一级路线甲" }).first().click({ button: "right" });
-  const ctx = page.locator(".ctx");
-  await expect(ctx).toBeVisible();
-  await ctx.getByText("新增子节点", { exact: true }).click();
+  // The first-use flow exposes child creation without requiring a right click.
+  await page.locator(".rm-card", { hasText: "A01 一级路线甲" }).first().click();
+  await page.getByRole("button", { name: "+ 子节点", exact: true }).click();
   const modal = page.locator(".modal").filter({ hasText: "新增节点" });
   await expect(modal).toBeVisible();
   await modal.locator("input").first().fill("A01 子节点：梯度加热");

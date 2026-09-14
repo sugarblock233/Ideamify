@@ -15,7 +15,7 @@ import { expect, test } from "@playwright/test";
 
 const TOKEN = "e2e-test-token-0001";
 const OTHER_TOKEN = "e2e-other-token-0001";
-const BASE = "http://127.0.0.1:8021";
+const BASE = `http://127.0.0.1:${process.env.E2E_PORT ?? 8021}`;
 
 async function api(
   page,
@@ -79,6 +79,40 @@ async function enterStudio(page, pid: string, node?: string) {
   await page.getByRole("button", { name: "打开" }).click();
   await expect(page.locator("select")).toHaveValue(pid);
 }
+
+test("AI updates remain refreshable after reading another node", async ({ page }) => {
+  const s = await seedDeepTree(page);
+  await enterStudio(page, s.pid);
+  await expect(page.locator(".rm-card")).toHaveCount(2);
+  const revision = (await api(page, "GET", `/api/v1/projects/${s.pid}`)).json.revision;
+  const changed = await api(page, "POST", `/api/v1/projects/${s.pid}/commits`, {
+    request_id: crypto.randomUUID(), expected_revision: revision,
+    summary: "Update a route from the AI session",
+    operations: [{ op: "node.update", id: s.a, fields: { title: "AI updated route" } }],
+  }, OTHER_TOKEN);
+  expect(changed.status, JSON.stringify(changed.json)).toBe(200);
+  // Read the new project revision through a different node before polling.
+  await page.locator(".rm-card", { hasText: "三层B" }).click();
+  await expect(page.locator("h2", { hasText: "三层B" })).toBeVisible();
+  await page.getByRole("button", { name: "刷新", exact: true }).click();
+  await expect(page.locator(".rm-card", { hasText: "AI updated route" })).toBeVisible();
+});
+
+test("browser reload warns before discarding a research draft", async ({ page }) => {
+  const s = await seedDeepTree(page);
+  await enterStudio(page, s.pid, s.a);
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  const draft = page.locator("textarea").first();
+  await draft.fill("Unsaved observation from today's experiment");
+  let warned = false;
+  page.on("dialog", async (dialog) => {
+    warned = dialog.type() === "beforeunload";
+    await dialog.dismiss();
+  });
+  await page.reload({ timeout: 3000 }).catch(() => {});
+  expect(warned).toBe(true);
+  await expect(draft).toHaveValue("Unsaved observation from today's experiment");
+});
 
 test("A03 首次打开：三层树只显示前两级，第三层折叠隐藏", async ({ page }) => {
   const s = await seedDeepTree(page);

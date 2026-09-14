@@ -54,6 +54,9 @@ export default function Workspace({
 }: WorkspaceProps) {
   const [project, setProject] = useState<Project | null>(null);
   const [graph, setGraph] = useState<GraphNode[]>([]);
+  // Reading a node can advance the known project revision without updating
+  // the canvas. Poll and refresh against the graph we actually rendered.
+  const graphRevisionRef = useRef(0);
   const [graphLoaded, setGraphLoaded] = useState(false);
   /** B04: archived nodes are hidden by default. Without this toggle a node
    *  archived in the browser would be unreachable (the graph and search both
@@ -175,6 +178,16 @@ export default function Workspace({
     dirtyRef.current = dirty;
   }, [dirty]);
 
+  useEffect(() => {
+    if (!dirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirty]);
+
   /** A02: dirty draft was read at a revision older than the server's — saving
    *  now would squash commits made in between; the user must rebase first. */
   const draftStale =
@@ -246,6 +259,7 @@ export default function Workspace({
   const syncAll = useCallback(async () => {
     const g = await fetchGraph();
     setGraph(g.nodes);
+    graphRevisionRef.current = g.project_revision;
     setGraphLoaded(true);
     setProject((p) => (p ? { ...p, revision: g.project_revision } : p));
     const sel = selectedRef.current;
@@ -273,7 +287,7 @@ export default function Workspace({
       await loadNodeRelations(sel, incArchRef.current, null, false);
       loadNodeCommits(sel);
     }
-  }, [pid, loadNodeRelations, loadNodeCommits, applyServerSnapshot, ironToast]);
+  }, [pid, fetchGraph, loadNodeRelations, loadNodeCommits, applyServerSnapshot, ironToast]);
 
   /* -------------------------------- selection ----------------------------- */
 
@@ -411,6 +425,7 @@ export default function Workspace({
         setAppVersion(sess.app_version);
         setProject({ ...proj, objective: proj.objective ?? "" } as Project);
         setGraph(g.nodes);
+        graphRevisionRef.current = g.project_revision;
         setGraphLoaded(true);
         // A03: first open (no saved view at all) → show only the virtual root
         // plus the first two business levels (fold every depth ≥ 2 node).
@@ -477,7 +492,10 @@ export default function Workspace({
     void (async () => {
       try {
         const g = await fetchGraph();
-        if (alive) setGraph(g.nodes);
+        if (alive) {
+          setGraph(g.nodes);
+          graphRevisionRef.current = g.project_revision;
+        }
       } catch (e) {
         if (alive) ironToast(e instanceof ApiError ? e.message : "加载失败", "err");
       }
@@ -494,7 +512,7 @@ export default function Workspace({
     const tick = async () => {
       try {
         const proj = await api.project(pid);
-        const cur = projRef.current?.revision ?? 0;
+        const cur = graphRevisionRef.current;
         if (proj.revision > cur) setPendingRev(proj.revision);
       } catch {
         /* transient network hiccup; next tick retries */
@@ -543,6 +561,7 @@ export default function Workspace({
       }
       setMarks({ newIds, changedIds, badges });
       setGraph(g.nodes);
+      graphRevisionRef.current = g.project_revision;
       setProject((p) => (p ? { ...p, revision: g.project_revision } : p));
       setPendingRev(null);
       if (selectedRef.current) {
@@ -946,7 +965,7 @@ async function rebaseDraft() {
             void (async () => {
               try {
                 const p2 = await api.project(pid);
-                const loaded = projRef.current?.revision ?? 0;
+                const loaded = graphRevisionRef.current;
                 if (p2.revision > loaded) {
                   setPendingRev(p2.revision);
                   await loadUpdates();
@@ -1040,6 +1059,7 @@ async function rebaseDraft() {
             }
           }}
           onCreateRelation={() => node && setCreateRelFrom(node.id)}
+          onCreateChild={() => node && setCreateNodeParent(node.id)}
           onEditRelation={(r, f) => void editRelationAction(r, f)}
           onArchiveRelation={(r, reason) => void archiveRelationAction(r, reason)}
           onRestoreRelation={(r, reason) => void restoreRelationAction(r, reason)}

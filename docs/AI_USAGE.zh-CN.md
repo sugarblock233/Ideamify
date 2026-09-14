@@ -24,13 +24,15 @@ Web 界面相同的提交端点上，冲突规则完全一致。本仓库所有�
 
 子命令级 `--base <url>` 可作为基地址的便捷覆盖（它不是凭证）。
 
+在仓库根目录执行（Bash / Zsh 均可）：
+
 ```bash
 export RESEARCHMAP_BASE_URL=http://127.0.0.1:8000
 export RESEARCHMAP_TOKEN="<研究员发给你的令牌>"
-RM="python3 /path/to/tools/researchmap.py"
+rmcli() { python3 tools/researchmap.py "$@"; }
 
-$RM health      # 无需令牌：确认服务器可达
-$RM session     # 你的身份：{"actor": "<令牌名>", "app_version": "…"}
+rmcli health      # 无需令牌：确认服务器可达
+rmcli session     # 你的身份：{"actor": "<令牌名>", "app_version": "…"}
 ```
 
 身份：每次写入记录的 `actor` 都是**令牌名**，由服务器端判定。提交里可选的
@@ -42,16 +44,16 @@ $RM session     # 你的身份：{"actor": "<令牌名>", "app_version": "…"}
 
 | 命令 | 说明 |
 |---|---|
-| `$RM projects` | 项目列表（id/名称/目标/当前 `revision`），分页 |
-| `$RM project <PID>` | 项目元信息 + 当前 `revision`（你的写入基线） |
-| `$RM context <PID> [--focus N] [--q 关键词] [--max-chars B] [--format json\|markdown]` | **首要读取入口**：预算化上下文（见 §2）。`--node` 是 `--focus` 的别名，`--query` 是 `--q` 的别名 |
-| `$RM graph <PID> [--text]` | 全部未归档节点（layout 输入：id/parent_id/order_index/计数）；默认输出完整 JSON |
-| `$RM node <PID> <NID>` | **单节点全量字段（不截断**，仅受 schema 长度上限**）**——用于定点补读长字段与完整证据 |
-| `$RM relations <PID> <NID> [--include-archived] [--limit N] [--cursor C]` | 单节点直接关联，分页，带目标路径 |
-| `$RM search <PID> "关键词" [--limit N]` | 关键词搜索（标题/摘要/标签/观察/结论，中文子串可用） |
-| `$RM commits <PID> [--node NID] [--limit N] [--cursor C]` | 提交历史（谁在哪个版本改了什么、为什么） |
-| `$RM commit-detail <PID> <CID>` | 单个提交的原始 `operations` 与实际 `changes`（before/after） |
-| `$RM export <PID> [--out 文件]` | 完整逻辑导出（含归档对象与全部历史）——交接快照。`--output` 是 `--out` 的别名 |
+| `rmcli projects` | 项目列表（id/名称/目标/当前 `revision`），分页 |
+| `rmcli project <PID>` | 项目元信息 + 当前 `revision`（你的写入基线） |
+| `rmcli context <PID> [--focus N] [--q 关键词] [--max-chars B] [--format json\|markdown]` | **首要读取入口**：预算化上下文（见 §2）。`--node` 是 `--focus` 的别名，`--query` 是 `--q` 的别名 |
+| `rmcli graph <PID> [--text]` | 全部未归档节点（layout 输入：id/parent_id/order_index/计数）；默认输出完整 JSON |
+| `rmcli node <PID> <NID>` | **单节点全量字段（不截断**，仅受 schema 长度上限**）**——用于定点补读长字段与完整证据 |
+| `rmcli relations <PID> <NID> [--include-archived] [--limit N] [--cursor C]` | 单节点直接关联，分页，带目标路径 |
+| `rmcli search <PID> "关键词" [--limit N]` | 关键词搜索（标题/摘要/标签/观察/结论，中文子串可用） |
+| `rmcli commits <PID> [--node NID] [--limit N] [--cursor C]` | 提交历史（谁在哪个版本改了什么、为什么） |
+| `rmcli commit-detail <PID> <CID>` | 单个提交的原始 `operations` 与实际 `changes`（before/after） |
+| `rmcli export <PID> [--out 文件]` | 完整逻辑导出（含归档对象与全部历史）——交接快照。`--output` 是 `--out` 的别名 |
 
 ---
 
@@ -137,8 +139,8 @@ $RM session     # 你的身份：{"actor": "<令牌名>", "app_version": "…"}
 ### 3.1 请求文件就是可重放工件
 
 ```bash
-$RM commit <PID> ops.json --dry-run   # 演练：全量校验，不落库
-$RM commit <PID> ops.json             # 正式提交（位置参数或 --file）
+rmcli commit <PID> ops.json --dry-run   # 演练：全量校验，不落库
+rmcli commit <PID> ops.json             # 正式提交（位置参数或 --file）
 ```
 
 `ops.json` 是完整 CommitRequest：`request_id`（UUID）、`expected_revision`
@@ -247,8 +249,8 @@ project_revision, revision_if_committed, plan, warnings}`；不落库，正式
 ## 4. 创建项目
 
 ```bash
-$RM create-project --file examples/01_create_project.json
-$RM create-project "名称" "目标文本"      # 内联简写
+rmcli create-project --file examples/01_create_project.json
+rmcli create-project "名称" "目标文本"      # 内联简写
 ```
 
 `--file` 模式下 body 必须恰好是 `request_id` + `name`（1–100）+

@@ -26,13 +26,15 @@ conflict rules as the web UI. All quoted sample data in this repo is synthetic.
 A subcommand-level `--base <url>` exists as a convenience override of the
 base URL (not a credential).
 
+Run from the repository root (Bash or Zsh):
+
 ```bash
 export RESEARCHMAP_BASE_URL=http://127.0.0.1:8000
 export RESEARCHMAP_TOKEN="<token the researcher gave you>"
-RM="python3 /path/to/tools/researchmap.py"
+rmcli() { python3 tools/researchmap.py "$@"; }
 
-$RM health      # no token needed; server reachable?
-$RM session     # your identity: {"actor": "<token name>", "app_version": "…"}
+rmcli health      # no token needed; server reachable?
+rmcli session     # your identity: {"actor": "<token name>", "app_version": "…"}
 ```
 
 Identity: the `actor` recorded on every write is the **token name**, decided
@@ -45,16 +47,16 @@ trusted space (SPEC §9). Do not expect per-project 403s; they do not exist.
 
 | Command | What you get |
 |---|---|
-| `$RM projects` | All projects (id/name/objective/current `revision`), paginated |
-| `$RM project <PID>` | Project metadata + current `revision` (your write baseline) |
-| `$RM context <PID> [--focus N] [--q KW] [--max-chars B] [--format json\|markdown]` | **The primary read** — budgeted context (see §2). `--node` aliases `--focus`, `--query` aliases `--q` |
-| `$RM graph <PID> [--text]` | All non-archived nodes (layout input: id/parent_id/order_index/counts); default output is the full JSON |
-| `$RM node <PID> <NID>` | **One node, every field, untruncated** (within schema limits) — use it to double-read long fields and full evidence |
-| `$RM relations <PID> <NID> [--include-archived] [--limit N] [--cursor C]` | Direct relations of one node, paginated, with target paths |
-| `$RM search <PID> "关键词" [--limit N]` | Keyword search over title/summary/tags/finding/decision (Chinese substring works) |
-| `$RM commits <PID> [--node NID] [--limit N] [--cursor C]` | Commit history (who changed what, why, at which revision) |
-| `$RM commit-detail <PID> <CID>` | One commit: original `operations` + actual `changes` (before/after) |
-| `$RM export <PID> [--out file]` | Complete logical JSON (incl. archived objects and history) — handoff snapshot. `--output` aliases `--out` |
+| `rmcli projects` | All projects (id/name/objective/current `revision`), paginated |
+| `rmcli project <PID>` | Project metadata + current `revision` (your write baseline) |
+| `rmcli context <PID> [--focus N] [--q KW] [--max-chars B] [--format json\|markdown]` | **The primary read** — budgeted context (see §2). `--node` aliases `--focus`, `--query` aliases `--q` |
+| `rmcli graph <PID> [--text]` | All non-archived nodes (layout input: id/parent_id/order_index/counts); default output is the full JSON |
+| `rmcli node <PID> <NID>` | **One node, every field, untruncated** (within schema limits) — use it to double-read long fields and full evidence |
+| `rmcli relations <PID> <NID> [--include-archived] [--limit N] [--cursor C]` | Direct relations of one node, paginated, with target paths |
+| `rmcli search <PID> "关键词" [--limit N]` | Keyword search over title/summary/tags/finding/decision (Chinese substring works) |
+| `rmcli commits <PID> [--node NID] [--limit N] [--cursor C]` | Commit history (who changed what, why, at which revision) |
+| `rmcli commit-detail <PID> <CID>` | One commit: original `operations` + actual `changes` (before/after) |
+| `rmcli export <PID> [--out file]` | Complete logical JSON (incl. archived objects and history) — handoff snapshot. `--output` aliases `--out` |
 
 ---
 
@@ -145,8 +147,8 @@ real commit, and every network retry.
 ### 3.1 The request file is the replayable artifact
 
 ```bash
-$RM commit <PID> ops.json --dry-run   # validate + plan; the SERVER persists nothing
-$RM commit <PID> ops.json             # real commit (positional file or --file)
+rmcli commit <PID> ops.json --dry-run   # validate + plan; the SERVER persists nothing
+rmcli commit <PID> ops.json             # real commit (positional file or --file)
 ```
 
 `ops.json` is a full CommitRequest: `request_id` (UUID),
@@ -272,8 +274,8 @@ commit re-validates from scratch (a dry-run is not a lock).
 ## 4. Creating projects
 
 ```bash
-$RM create-project --file examples/01_create_project.json
-$RM create-project "Name" "Objective text"      # inline shorthand
+rmcli create-project --file examples/01_create_project.json
+rmcli create-project "Name" "Objective text"      # inline shorthand
 ```
 
 Via `--file` the body must be exactly `request_id` + `name` (1–100) +

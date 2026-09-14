@@ -15,7 +15,7 @@ import type {
   RelationKind,
 } from "../lib/types";
 import { NODE_KINDS, NODE_STATUSES, RELATION_KINDS } from "../lib/types";
-import { KIND_LABEL, RELATION_LABEL, STATUS_LABEL, fmtTime } from "../lib/format";
+import { KIND_LABEL, RELATION_LABEL, STATUS_LABEL, STATUS_COLOR, fmtTime } from "../lib/format";
 import { MAX_CANVAS_RELATION, relationLabel } from "../lib/relations";
 import { renderMarkdown } from "../lib/markdown";
 import type { FieldConflict } from "../lib/merge";
@@ -136,6 +136,7 @@ export interface SidePanelProps {
   cameFrom: string | null;
   onBackToFrom: () => void;
   onCreateRelation: () => void;
+  onCreateChild: () => void;
   onEditRelation: (r: RelationItem, fields: { kind: RelationKind; reason: string }) => void;
   onArchiveRelation: (r: RelationItem, reason: string) => void;
   onRestoreRelation: (r: RelationItem, reason: string) => void;
@@ -248,7 +249,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         <span
           className="status-pill"
           style={{
-            color: "var(--st-red)",
+            color: STATUS_COLOR[n.status],
             marginLeft: 8,
             background: "rgba(0,0,0,0.03)",
             fontSize: 12,
@@ -482,6 +483,9 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
             {p.dirty && <span className="chip">有未保存的修改</span>}
             <button className="primary" onClick={() => setEditing(true)}>
               编辑
+            </button>
+            <button onClick={p.onCreateChild} disabled={n.archived}>
+              + 子节点
             </button>
           </>
         )}

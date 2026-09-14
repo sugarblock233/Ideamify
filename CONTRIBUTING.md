@@ -1,156 +1,99 @@
 # Contributing
 
-Ideamify (the app, spec and CLI are named **ResearchMap**) is a
-lightweight, self-hosted web app where one researcher and their trusted AI
-tools co-maintain a research-evolution map. This repo is maintained by a single
-owner; well-scoped, verified pull requests are welcome.
+Bug reports, documentation improvements and small, focused pull requests are
+welcome. Questions and discussions can be in English or Chinese.
 
-## Repository layout
+v0.1 is now being used as a research notebook. Prioritize lost records,
+incorrect history, broken AI handoffs and reproducible usability problems.
+For a new feature, describe a concrete research workflow in a
+[discussion](https://github.com/sugarblock233/Ideamify/discussions) first.
 
-```
-backend/            FastAPI + SQLAlchemy + SQLite application (app/)
-                      tests/  — pytest suite (wraps the HTTP smoke checks)
-                      requirements.txt  — direct deps (pinned)
-                      requirements.lock.txt — full transitive lock (used by Docker + CI)
-frontend/           React 19 + TypeScript + Vite + @xyflow/react
-                      src/lib       — layout, API client, relations (pure logic + unit tests)
-                      src/workspace — canvas and panels
-                      e2e/          — Playwright browser tests
-tools/              researchmap.py — thin HTTP-only CLI for humans and AIs
-                      backup.py    — SQLite online backup / verify / restore
-examples/           synthetic commit-request templates (JSON)
-scripts/            stress_test.py — 1000+ node / 3000 relation load test
-docs/               SPEC.md (product + tech constraints), DECISIONS.md,
-                      AI_USAGE.md (external AI protocol)
-.github/            CI workflow, issue/PR templates, Dependabot
-Dockerfile          multi-stage image (frontend build + FastAPI serving dist)
-compose.yaml        single container + volume `researchmap-data`
-```
+## Local development
 
-## Development setup
-
-Requirements: Python 3.13, Node 22+, (optionally) Docker for the container path.
-
-### Backend
+Use Python 3.13 and Node 22 (the CI and container baseline). From the repository root:
 
 ```bash
-cd backend
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt   # dev venv uses the direct-deps base
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.lock.txt
+npm --prefix frontend ci
 ```
 
-The project runs from a **scratch database** configured via the environment,
-never from a shared one:
+Start the backend in one terminal. These credentials and data are synthetic:
 
 ```bash
-RESEARCHMAP_DB=/tmp/rm-dev.db \
-RESEARCHMAP_TOKENS='{"dev-researcher":"dev-token-0001-aaaa"}' \
-.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+RESEARCHMAP_DB="$(mktemp -d)/researchmap.db" \
+RESEARCHMAP_TOKENS='{"dev":"synthetic-dev-token-0001"}' \
+backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend \
+  --host 127.0.0.1 --port 8000
 ```
 
-Every token value must be ≥ 12 chars and unique; the token *name* becomes the
-actor identity in commit history, so treat tokens as root credentials for the
-instance.
+In a second terminal, also from the repository root:
 
-### Frontend
+```bash
+npm --prefix frontend run dev
+```
+
+Open http://127.0.0.1:5173/. Vite proxies `/api` to the backend on port 8000.
+For the deployment setup, see the [README](README.md).
+
+## Check your change
+
+| Change | Command from the repository root |
+| --- | --- |
+| Backend or CLI | `backend/.venv/bin/python -m pytest backend/tests -q` |
+| Frontend logic | `npm --prefix frontend test` |
+| Frontend build | `npm --prefix frontend run build` |
+| Browser workflows | `npm --prefix frontend run e2e` (build first) |
+
+Install the test browser once: `cd frontend && npx playwright install chromium`.
+The E2E server uses a fresh temporary database on each invocation. Overrides:
+`E2E_PORT` (default 8021), `E2E_PYTHON`, and `E2E_DB_DIR` (scratch data only).
+Test screenshots go to `frontend/test-results/`, without modifying documentation.
+To refresh the README images after a UI change:
 
 ```bash
 cd frontend
-npm ci            # always from the lockfile
-npm run dev       # Vite on :5173, proxies /api to 127.0.0.1:8000
+npm run build
+UPDATE_DOC_SCREENSHOTS=1 npx playwright test e2e/screenshots.spec.ts
 ```
 
-### Container
+Use checks relevant to the change, and add a regression check for a bug fix.
+Check interface changes in a real browser too. Report the commands you ran,
+their actual results and anything you could not verify. CI also builds the
+container and exercises persistence and backup/restore.
 
-```bash
-cp .env.example .env        # set the two placeholder tokens (≥ 12 chars each)
-docker compose up -d --build
-# opens on http://127.0.0.1:8000/ (loopback-only by default)
-```
+## Repository layout
 
-## Testing
+- `backend/app/`: API, authentication, commit service and SQLite models
+- `frontend/src/`: React UI, canvas and shared client logic
+- `frontend/e2e/`: browser workflows with synthetic data
+- `tools/`: HTTP CLI and SQLite backup tool
+- `examples/`: synthetic commit requests
+- `docs/`: user guides, [specification](docs/SPEC.md), [design decisions](docs/DECISIONS.md) and historical archive
 
-Run the suite that matches your change; PRs touching several layers should run
-all of them:
+`backend/requirements.txt` lists direct dependencies;
+`backend/requirements.lock.txt` pins the complete environment used by CI and Docker.
+Update the lockfile deliberately when dependencies change.
 
-| Suite | Command (from that directory) | Covers |
-| --- | --- | --- |
-| Backend | `cd backend && .venv/bin/python -m pytest tests -q` | auth, commit pipeline, idempotency, 409 conflicts, evidence gate, archive/export, concurrent writers |
-| Frontend unit | `cd frontend && npm test` | layout determinism, folding, relation endpoint rules, stress-graph fixtures |
-| Typecheck + build | `cd frontend && npm run build` | `tsc --noEmit` + production build |
-| Browser e2e | `cd frontend && npm run build && npx playwright test` | login, project/node creation, search/locate, refresh (production-shaped server on a scratch DB) |
-| Load (optional) | `python3 scripts/stress_test.py` | 1000+ node / 3000 relation synthetic graph, self-contained scratch server |
+## Commits and pull requests
 
-The e2e server reads `E2E_PYTHON` (default `../backend/.venv/bin/python`) and
-`E2E_DB_DIR` (default `/tmp/rm-e2e`) from the environment — every run must use
-a fresh scratch DB, never a real one.
+Use English Conventional Commit subjects, for example
+`fix(workspace): keep AI updates visible after selecting a node`.
+Keep subjects concise (roughly 72 characters), with one logical change per
+commit. PR titles and summaries should be English first; Chinese explanations
+are welcome. Explain the user-visible result, why it matters and how you tested it.
 
-## Commit conventions
+Update `CHANGELOG.md` under **Unreleased** for changes that affect users. Keep
+the English and Chinese user guides aligned. Document API, CLI or schema
+changes and any migration steps. Do not rewrite shared history or force-push.
 
-Lightweight Conventional Commits, **English subjects**:
+AI assistance is welcome. The contributor is responsible for understanding,
+reviewing and testing the change. Acknowledge substantial AI assistance in
+the PR description; human contributors retain responsibility and authorship.
 
-```
-type(scope): short description     # e.g. fix(canvas): collapse deep branches on first load
-```
+## Data and security
 
-- Types: `fix`, `feat`, `docs`, `test`, `ci`, `build`, `refactor`, `perf`,
-  `chore`. Scope optional.
-- Subject ~72 chars, states the change; body (optional, English-first; Chinese
-  annotations allowed) explains why and how it was verified.
-- No `update`, `fix bugs`, or one-word subjects.
-- One logical change per commit.
-- Branch names: lowercase English with hyphens, off `main`.
-- Do **not** rewrite shared history, force-push, or change Git identities to
-  re-word old commits.
-- Breaking API/CLI changes must be marked (breaking-change note in the commit
-  body and PR) and documented in the PR migration notes.
-
-## Pull request conventions
-
-Use the PR template honestly — it asks for **verification actually performed**
-(commands + real results), UI screenshots when the interface changes, and an
-explicit list of unverified items. UI-affecting changes should be checked in a
-real browser at 1440×900 or 1280×800; screenshots must use synthetic data.
-Squash-merge-friendly titles and descriptions are appreciated.
-
-## Issues and feature requests
-
-- **Bug report**: version/commit, install method, OS, browser (for UI bugs),
-  minimal steps, expected vs actual, sanitized logs/screenshots, a minimal
-  **synthetic** reproduction.
-- **Feature request**: the research problem it answers, target behavior,
-  alternatives, and a self-check against the documented boundaries
-  (no built-in LLM, no automated research execution, single-researcher
-  trusted circle).
-- Labels in use: `bug` (defect to fix), `enhancement` (requested feature),
-  `documentation` (docs wrong/missing), `question` (needs an answer, not a
-  change), `good first issue` (small, well-scoped, approvable), `help wanted`
-  (analysis done, implementation open).
-- Questions are welcome in **English or Chinese** — language is never a reason
-  to decline a contribution.
-
-## Data, credentials, and test hygiene
-
-- **Never commit tokens.** `.env*` files are gitignored; only `.env.example`
-  (placeholders) is tracked. Tokens live in runtime environment variables only.
-- Use scratch databases for anything you run — `/tmp/rm-*.db` by convention.
-  Never point the app or tests at real research data, and never reuse a real
-  deployment's database for experiments.
-- All example/fixture data must be **synthetic and labeled as such** (see
-  `examples/`). Real experiment logs, reports, or project content never enter
-  the repo, issues, or PRs.
-- Backups must not contain token configuration; run restoration drills on
-  copies, and store copies on separate storage from the running instance.
-
-## AI-assisted contributions
-
-AI assistance is fine and common in this project. The human who submits the
-change is responsible for it:
-
-- Understand and be able to explain every line you submit.
-- Actually run the verification you claim; do not invent test results,
-  experiments, or "verified" claims.
-- Check dependency and code provenance of anything AI-generated.
-- Mention AI assistance honestly in the PR description — do not represent an
-  AI contribution as entirely yours. Do not list models or AI tools as
-  co-authors/owners; humans own the repo.
+Use synthetic data and isolated databases or Compose projects. Never test on
+someone's research instance or commit credentials, private records, database
+files or personal filesystem paths. Sanitize screenshots and logs before
+sharing. Report vulnerabilities through [SECURITY.md](SECURITY.md).
