@@ -101,7 +101,7 @@ export const zh = {
   "ws.confirm.switch.project": "切换项目，",
   "ws.confirm.new.project": "新建项目会离开当前项目，",
   "ws.confirm.exit": "退出当前项目，",
-  "ws.created.rev": "已创建（v{v}）",
+  "ws.created.rev": "已创建（记录 #{v}）",
   "ws.saved.rev": "已保存（v{v}）",
   "ws.create.fail": "创建失败",
   "ws.no.change": "记录目前无变化",
@@ -130,30 +130,14 @@ export const zh = {
   "common.cancel": "取消",
   "common.close": "关闭",
   "common.top.level.option": "（项目一级节点）",
+  "ws.draft.heading": "新增节点",
+  "ws.draft.unsaved": "未保存",
+  "ws.draft.under.parent": "父级：",
+  "ws.draft.parent.root": "一级路线（父级：项目一级节点）",
 
-  // ---- CreateNodeModal ---------------------------------------------------------
-  "kind.finding.long": "发现（含观察/结果）",
-  "modal.create.title": "新增节点 · 父级：{parent}",
-  "modal.field.title": "标题（1–80）",
-  "modal.field.summary": "摘要（一句话研究增量，0–280）",
-  "modal.field.tags": "标签（逗号分隔）",
-  "modal.gated.hint":
-    "状态为「受支持／不支持」时，必须给出适用条件、发现与决定，并至少 1 条证据（与服务端同一闸口）。",
-  "modal.field.scope": "适用条件 scope（必填，≤1000）",
-  "modal.ph.scope": "该结论适用于哪些材料 / 工艺 / 条件",
-  "modal.field.finding": "发现 finding（必填，≤2000）",
-  "modal.ph.finding": "观察到的事实与结果，尽量定量",
-  "modal.field.decision": "决定 decision（必填，≤2000）",
-  "modal.ph.decision": "采纳 / 放弃 / 修改什么条件，以及为什么",
-  "modal.field.evidence": "证据（≥1 条）",
-  "modal.ev.inline": "行内记录",
-  "modal.ev.path": "路径",
-  "modal.ev.label.ph": "名称",
-  "modal.ph.url": "https://…",
-  "modal.ph.path": "相对仓库路径",
-  "modal.ph.inline": "内容",
-  "modal.ev.remove.title": "删除这条证据",
-  "modal.ev.add": "＋ 添加证据",
+  // ---- 新建草稿会话（原 CreateNodeModal）------------------------------------
+  // modal.create / modal.creating 仍用于草稿保存条（C2）；仅弹窗使用的字段文案
+  // 已随弹窗退役删除，草稿表单复用 NodeFieldsForm 的 edit.* 字段标签。
   "modal.create": "创建",
   "modal.creating": "创建中…",
 

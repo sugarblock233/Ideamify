@@ -49,6 +49,9 @@ function nodeOffscreen(wrap: HTMLElement, nodeId: string): boolean {
 
 export interface ResizablePanelProps {
   dirty: boolean;
+  /** C2: a node-create draft lives only in the side panel — while a session
+   *  is open the panel must be shown, even if nothing else would expand it. */
+  forceOpen?: boolean;
   selectedId: string | null;
   onLocate: (nodeId: string) => void;
   children: ReactNode;
@@ -138,6 +141,18 @@ export default function ResizablePanel(p: ResizablePanelProps) {
     if (p.dirty && collapsedRef.current) setCollapsed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.dirty]);
+
+  // C2: same for an open create-draft session — the panel is its only editor,
+  // so starting one reveals the panel immediately (a fresh empty draft is not
+  // "dirty" yet, the p.dirty effect above would fire only on the first keystroke).
+  useEffect(() => {
+    if (p.forceOpen && collapsedRef.current) {
+      explicitRef.current = true;
+      collapsedRef.current = false;
+      setCollapsed(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.forceOpen]);
 
   const toggleCollapsed = useCallback(() => {
     explicitRef.current = true;

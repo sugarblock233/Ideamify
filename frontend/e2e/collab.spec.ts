@@ -370,9 +370,12 @@ test("R02 提交后的自动刷新（syncAll）不得静默清掉未处理的同
   // 修复前：重新合并的基线已经是服务器值 v2，冲突"看起来"不存在了 → 列表被清空、
   // 保存重新可用 → 用户按保存就静默覆盖了 REMOTE。修复后：未处理的冲突必须保留。
   await page.getByRole("button", { name: "+ 一级路线" }).click();
-  const modal = page.locator(".modal").filter({ hasText: "新增节点" });
-  await modal.locator("input").first().fill("刷新冲突例：无关的新路线（合成）");
-  await modal.getByRole("button", { name: "创建" }).click();
+  // C2：创建走侧栏草稿会话（弹窗已退役）；这里与待解决冲突互不相干
+  const draftPanel = page.locator(".side");
+  await expect(draftPanel.getByRole("heading", { name: /新增节点/ })).toBeVisible();
+  const draftForm = draftPanel.locator(".editform");
+  await draftForm.locator("input").first().fill("刷新冲突例：无关的新路线（合成）");
+  await draftPanel.getByRole("button", { name: "创建" }).click();
   await expect(page.locator(".rm-card", { hasText: "无关的新路线" }).first())
     .toBeVisible({ timeout: 15_000 }); // 提交确实成功了（否则下面的断言会因别的原因通过）
 

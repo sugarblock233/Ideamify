@@ -40,7 +40,8 @@ async function enterStudio(page, pid: string) {
   await expect(page.locator("select")).toHaveValue(pid);
 }
 
-/** 顶级路线：TopBar「+ 一级路线」→ 弹窗（父级＝项目一级节点）。 */
+/** 顶级路线：TopBar「+ 一级路线」→ 侧栏草稿会话（C2：弹窗已退役；表单字段
+ *  常驻，固定顺序 summary → rationale → finding → decision → scope）。 */
 async function createRoot(page, title: string, opts: {
   kind?: string;
   status?: string;
@@ -48,31 +49,32 @@ async function createRoot(page, title: string, opts: {
   gate?: { scope: string; finding: string; decision: string; evLabel: string; evValue: string };
 }) {
   await page.getByRole("button", { name: "+ 一级路线" }).click();
-  const modal = page.locator(".modal").filter({ hasText: "新增节点" });
-  await expect(modal.getByRole("heading", { name: /新增节点/ })).toBeVisible();
-  const kindSel = modal.locator("select").first();
-  const statusSel = modal.locator("select").nth(1);
+  const panel = page.locator(".side");
+  await expect(panel.getByRole("heading", { name: /新增节点/ })).toBeVisible();
+  const form = panel.locator(".editform");
+  const kindSel = form.locator("select").first();
+  const statusSel = form.locator("select").nth(1);
   if (opts.kind) await kindSel.selectOption(opts.kind);
   if (opts.status) await statusSel.selectOption(opts.status);
 
-  const createBtn = modal.getByRole("button", { name: "创建" });
-  const gatedFields = modal.locator(".gated-fields");
+  const createBtn = panel.getByRole("button", { name: "创建" });
   if (opts.status && ["supported", "not_supported"].includes(opts.status)) {
-    // A06：红/绿状态 → 必填字段出现，缺项时无法提交
-    await expect(gatedFields).toBeVisible();
+    // A06：红/绿状态 → 要项未齐时创建按钮被客户端闸口禁用
+    await expect(page.locator(".hint", { hasText: "适用条件" }).first()).toBeVisible();
     expect(await createBtn.isDisabled()).toBe(true);
   }
-  await modal.locator("input").first().fill(title); // 标题（autoFocus）
+  await form.locator("input").first().fill(title);
   if (opts.summary) {
-    await modal.locator("textarea").first().fill(opts.summary);
+    await form.locator("textarea").first().fill(opts.summary);
   }
   if (opts.gate) {
-    const t = (i: number) => gatedFields.locator("textarea").nth(i);
-    await t(0).fill(opts.gate.scope);
-    await t(1).fill(opts.gate.finding);
-    await t(2).fill(opts.gate.decision);
-    await gatedFields.getByRole("button", { name: "＋ 添加证据" }).click();
-    const row = gatedFields.locator(".evid-row").first();
+    // 常驻字段固定顺序：0=summary, 1=rationale, 2=finding, 3=decision, 4=scope
+    await form.locator("textarea").nth(2).fill(opts.gate.finding);
+    await form.locator("textarea").nth(3).fill(opts.gate.decision);
+    await form.locator("textarea").nth(4).fill(opts.gate.scope);
+    expect(await createBtn.isDisabled()).toBe(true); // 还差 ≥1 条证据
+    await form.getByRole("button", { name: "+ 添加证据" }).click();
+    const row = form.locator(".evid-row").first();
     await row.locator("input").first().fill(opts.gate.evLabel); // 名称
     await row.locator("input").nth(1).fill(opts.gate.evValue); // 内容
     expect(await createBtn.isDisabled()).toBe(false);
@@ -135,11 +137,13 @@ test("A01 空数据库：浏览器完成 登录→建项目→两条一级路线
   // The first-use flow exposes child creation without requiring a right click.
   await page.locator(".rm-card", { hasText: "A01 一级路线甲" }).first().click();
   await page.getByRole("button", { name: "+ 子节点", exact: true }).click();
-  const modal = page.locator(".modal").filter({ hasText: "新增节点" });
-  await expect(modal).toBeVisible();
-  await modal.locator("input").first().fill("A01 子节点：梯度加热");
-  await modal.locator("textarea").first().fill("受甲启发的具体想法（合成）");
-  await modal.getByRole("button", { name: "创建" }).click();
+  const panel = page.locator(".side");
+  await expect(panel.getByRole("heading", { name: /新增节点/ })).toBeVisible();
+  await expect(panel.locator('[data-testid="draft-pathline"]', { hasText: "A01 一级路线甲" })).toBeVisible();
+  const form = panel.locator(".editform");
+  await form.locator("input").first().fill("A01 子节点：梯度加热");
+  await form.locator("textarea").first().fill("受甲启发的具体想法（合成）");
+  await panel.getByRole("button", { name: "创建" }).click();
   await expect(page.locator(".rm-card")).toHaveCount(3);
 
   // ---- 保存：选中子节点 → 编辑摘要 → 保存 → 收起 ----

@@ -16,13 +16,11 @@ import {
   type CommitResponse,
   type GraphNode,
   type NodeFull,
-  type NodeKind,
   type Project,
   type RelationItem,
   type RelationKind,
   type SearchItem,
 } from "../lib/types";
-import { statusLabel } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { replaceDeepLink } from "../lib/deeplink";
 import Canvas from "./Canvas";
@@ -55,6 +53,51 @@ interface WorkspaceProps {
   onChangeProject: (pid: string) => void;
   refreshProjectList: (list: ProjectLite[]) => void;
   onExit: () => void;
+}
+
+/** C2: a node-create draft session. `fields` reuses the shared Draft shape so
+ *  the side panel edits a create draft and an update draft through the same
+ *  NodeFieldsForm. */
+interface NodeDraftSession {
+  id: string;
+  requestId: string;
+  parentId: string | null;
+  fields: Draft;
+  err: string | null;
+  busy: boolean;
+}
+
+const draftEmpty: Draft = {
+  kind: "idea",
+  title: "",
+  summary: "",
+  status: "unexplored",
+  rationale: "",
+  finding: "",
+  decision: "",
+  scope: "",
+  details_md: "",
+  tags: [],
+  evidence: [],
+};
+
+/** C2: has the user typed anything into the create draft? Only then is
+ *  leaving the view guarded — a freshly opened empty draft is not worth a
+ *  confirm dialog. */
+function draftTouched(f: Draft): boolean {
+  return (
+    f.kind !== draftEmpty.kind ||
+    f.status !== draftEmpty.status ||
+    f.title.trim() !== "" ||
+    f.summary.trim() !== "" ||
+    f.rationale.trim() !== "" ||
+    f.finding.trim() !== "" ||
+    f.decision.trim() !== "" ||
+    f.scope.trim() !== "" ||
+    f.details_md.trim() !== "" ||
+    f.tags.length > 0 ||
+    f.evidence.some((e) => e.label.trim() || e.value.trim() || e.note.trim())
+  );
 }
 
 export default function Workspace({
@@ -114,6 +157,18 @@ export default function Workspace({
   const [commitCursor, setCommitCursor] = useState<string | null>(null);
   const [commitHasMore, setCommitHasMore] = useState(false);
 
+  /** C2: node-create happens on a draft session, not in a modal. The id and
+   *  request id are pinned at start (§10.1: stable identity across retries;
+   *  a retry can never create a second node — the backend is idempotent on
+   *  request_id). The session survives node switches / layout changes; leaving
+   *  a real leave path goes through confirmLeaveDraft like an edit draft.
+   *  Declared before the render-time project reset block below. */
+  const [nodeDraft, setNodeDraft] = useState<NodeDraftSession | null>(null);
+  const nodeDraftRef = useRef(nodeDraft);
+  useEffect(() => {
+    nodeDraftRef.current = nodeDraft;
+  }, [nodeDraft]);
+
   // B2: canvas layout (per-project pref). Reset during render on a project
   // switch — before any effect fires, so saved0/first-load read the slot of
   // the layout the new project actually opens with.
@@ -122,6 +177,7 @@ export default function Workspace({
   if (viewPid !== pid) {
     setViewPid(pid);
     setLayoutRaw(loadProjectViewPrefs(pid).layout);
+    setNodeDraft(null); // C2: a create draft belongs to one project only.
   }
 
   const saved0 = useMemo(
@@ -165,8 +221,6 @@ export default function Workspace({
   const [fitSignal, setFitSignal] = useState(0);
   const [toast, setToast] = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
 
-  const [createNodeParent, setCreateNodeParent] = useState<string | null | undefined>(undefined);
-  const [createNodeErr, setCreateNodeErr] = useState<string | null>(null);
   const [modalProject, setModalProject] = useState<"" | "create" | "edit">("");
   const [aiAccessOpen, setAiAccessOpen] = useState(false);
   const [createRelFrom, setCreateRelFrom] = useState<string | null>(null);
@@ -227,15 +281,21 @@ export default function Workspace({
     dirtyRef.current = dirty;
   }, [dirty]);
 
+  /** C2: an in-progress create draft guards leaving just like an edit draft. */
+  const createDirty = useMemo(
+    () => (nodeDraft ? draftTouched(nodeDraft.fields) : false),
+    [nodeDraft],
+  );
+
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !createDirty) return;
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [dirty]);
+  }, [dirty, createDirty]);
 
   /** A02: dirty draft was read at a revision older than the server's — saving
    *  now would squash commits made in between; the user must rebase first. */
@@ -344,7 +404,7 @@ export default function Workspace({
    *  (exit, new project, switch project, switch node, close panel). Cancel
    *  returns false and the caller must leave the draft and the view untouched. */
   function confirmLeaveDraft(what: string): boolean {
-    if (!dirty) return true;
+    if (!dirty && !createDirty) return true;
     return window.confirm(t("ws.confirm.draft", { what }));
   }
 
@@ -805,50 +865,90 @@ async function rebaseDraft() {
     [draftConflicts],
   );
 
-  /* ------------------------------ node actions ----------------------------- */
+  /* --------------------------- node-create draft (C2) ---------------------- */
 
-  async function createNodeAction(parent: string | null, form: NewNodeForm) {
-    const id = uuidv4();
+  /** C2 entry point: + 一级路线 (null) or + 子节点 (parentId). The ids are
+   *  pinned here so every later save/retry of this draft reuses them. */
+  const startNodeDraft = useCallback((parentId: string | null) => {
+    setNodeDraft({
+      id: uuidv4(),
+      requestId: uuidv4(),
+      parentId,
+      fields: { ...draftEmpty, tags: [], evidence: [] },
+      err: null,
+      busy: false,
+    });
+  }, []);
+
+  const cancelNodeDraft = useCallback(() => setNodeDraft(null), []);
+
+  /** §10.1/§10.2: submit the create draft. The op mirrors the old modal's
+   *  createNodeAction payload (A06 gate included); on failure the session is
+   *  KEPT with its pinned request id, so a retry resumes instead of creating
+   *  a second node (backend idempotency walks that back to the first node). */
+  async function commitNodeDraft() {
+    const s = nodeDraftRef.current;
+    if (!s || s.busy) return;
+    const f = s.fields;
+    const title = f.title.trim();
+    if (!title) return;
+    // A06: supported / not_supported 需要 scope / finding / decision + ≥1 证据
+    // （与服务端 _check_confirmed 同一闸口，前端先行拦截；与旧弹窗一致，非门控
+    // 字段填了也带上）。
     const op: CommitOp = {
       op: "node.create",
-      id,
-      kind: form.kind,
-      title: form.title,
-      summary: form.summary || "",
-      status: form.status,
-      tags: form.tags,
-      ...(parent ? { parent_id: parent } : {}),
+      id: s.id,
+      kind: f.kind,
+      title,
+      summary: f.summary.trim(),
+      status: f.status,
+      tags: f.tags,
+      ...(s.parentId ? { parent_id: s.parentId } : {}),
     };
-    // A06: supported / not_supported 需要 scope / finding / decision + ≥1 证据
-    // （与服务端 _check_confirmed 同一闸口，前端先行拦截）。
-    const scope = form.scope?.trim();
-    const finding = form.finding?.trim();
-    const decision = form.decision?.trim();
+    const scope = f.scope.trim();
+    const finding = f.finding.trim();
+    const decision = f.decision.trim();
     if (scope) op.scope = scope;
     if (finding) op.finding = finding;
     if (decision) op.decision = decision;
-    const evs = form.evidence?.filter((e) => e.label.trim() || e.value.trim());
-    if (evs && evs.length > 0) op.evidence = evs.map((e) => ({ ...e }));
-    const res = await commit(
-      [op],
-      t(parent ? "ws.summary.create.child" : "ws.summary.create.root", { title: form.title }),
-      {
-      onFail: (e) => {
-        const msg = e instanceof ApiError ? e.message : String(e);
-        const missing = e instanceof ApiError ? e.details["missing"] : undefined;
-        setCreateNodeErr(
-          `${msg}${Array.isArray(missing) ? t("ws.err.missing", { items: (missing as string[]).join(t("ws.err.missing.sep")) }) : ""}`,
-        );
-        ironToast(e instanceof ApiError ? e.message : t("ws.create.fail"), "err");
-      },
-    });
-    if (res) {
-      setCreateNodeParent(undefined);
-      setCreateNodeErr(null);
+    if (f.rationale.trim()) op.rationale = f.rationale.trim();
+    if (f.details_md.trim()) op.details_md = f.details_md;
+    const evs = f.evidence.filter((e) => e.label.trim() || e.value.trim());
+    if (evs.length > 0) op.evidence = evs.map((e) => ({ ...e }));
+    setNodeDraft({ ...s, busy: true, err: null });
+    try {
+      const res = await api.commit(pid, {
+        request_id: s.requestId,
+        // A05: pinned request id — a network retry re-sends the identical
+        // request, and an ambiguous outcome resolves to one node at most.
+        expected_revision: projRef.current?.revision ?? 0,
+        summary: t(s.parentId ? "ws.summary.create.child" : "ws.summary.create.root", { title }),
+        client_label: "researchmap-ui",
+        operations: [op],
+      });
+      setNodeDraft(null);
+      setProject((p) => (p ? { ...p, revision: res.revision } : p));
+      await syncAll();
       ironToast(t("ws.created.rev", { v: res.revision }), "ok");
-      void selectNode(id, { locate: true });
+      void selectNode(s.id, { locate: true });
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "REVISION_CONFLICT") {
+        // Someone else moved the graph: refetch quietly, keep the draft for a
+        // fresh retry (a create carries no per-field conflict to resolve).
+        setNodeDraft({ ...s, busy: false, err: t("ws.conflict.toast") });
+        void syncAll();
+      } else {
+        let msg: string;
+        if (e instanceof ApiError) {
+          const missing = e.details["missing"];
+          msg = `${e.message}${Array.isArray(missing) ? t("ws.err.missing", { items: (missing as string[]).join(t("ws.err.missing.sep")) }) : ""}`;
+        } else {
+          msg = String(e);
+        }
+        setNodeDraft({ ...s, busy: false, err: msg });
+        ironToast(e instanceof ApiError ? e.message : t("ws.create.fail"), "err");
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }
 
   /* organization helpers */
@@ -1051,7 +1151,7 @@ async function rebaseDraft() {
           setModalProject("create");
         }}
         onEditProject={() => setModalProject("edit")}
-        onNewRoot={() => setCreateNodeParent(null)}
+        onNewRoot={() => startNodeDraft(null)}
         onFit={() => setFitSignal((n) => n + 1)}
         onManualRefresh={() => {
           // A08: 手动刷新必须检测服务器是否真的更新——落后就按更新流程载入，
@@ -1120,7 +1220,7 @@ async function rebaseDraft() {
             onSelect={(id) => void selectNode(id)}
             onClearSelection={clearSelection}
             onPickRelation={(id) => setSelectedRelationId(id)}
-            onAddChild={(par) => setCreateNodeParent(par)}
+            onAddChild={(par) => startNodeDraft(par)}
             marks={marks}
             pendingLocate={pendingLocate}
             onLocated={() => setPendingLocate(null)}
@@ -1152,7 +1252,8 @@ async function rebaseDraft() {
         </div>
 
         <ResizablePanel
-          dirty={dirty}
+          dirty={dirty || createDirty}
+          forceOpen={!!nodeDraft}
           selectedId={selectedId}
           onLocate={(nid) => setPendingLocate({ nodeId: nid })}
         >
@@ -1194,8 +1295,24 @@ async function rebaseDraft() {
               setCameFrom(null);
             }
           }}
+          createDraft={
+            nodeDraft
+              ? {
+                  parentId: nodeDraft.parentId,
+                  parentLabel: nodeDraft.parentId
+                    ? nodeTitleById(graph, nodeDraft.parentId)
+                    : t("common.top.level.option"),
+                  fields: nodeDraft.fields,
+                  err: nodeDraft.err,
+                  busy: nodeDraft.busy,
+                  onFields: (f) => setNodeDraft((s) => (s ? { ...s, fields: f } : s)),
+                  onSave: () => void commitNodeDraft(),
+                  onCancel: cancelNodeDraft,
+                }
+              : null
+          }
           onCreateRelation={() => node && setCreateRelFrom(node.id)}
-          onCreateChild={() => node && setCreateNodeParent(node.id)}
+          onCreateChild={() => node && startNodeDraft(node.id)}
           onEditRelation={(r, f) => void editRelationAction(r, f)}
           onArchiveRelation={(r, reason) => void archiveRelationAction(r, reason)}
           onRestoreRelation={(r, reason) => void restoreRelationAction(r, reason)}
@@ -1235,17 +1352,6 @@ async function rebaseDraft() {
         </ResizablePanel>
       </div>
 
-      {createNodeParent !== undefined && (
-        <CreateNodeModal
-          parentLabel={createNodeParent ? nodeTitleById(graph, createNodeParent) : t("common.top.level.option")}
-          err={createNodeErr}
-          onClose={() => {
-            setCreateNodeParent(undefined);
-            setCreateNodeErr(null);
-          }}
-          onCreate={(form) => createNodeAction(createNodeParent, form)}
-        />
-      )}
       {modalProject !== "" && project && (
         <ProjectModal
           mode={modalProject}
@@ -1313,134 +1419,6 @@ function isDescOrSelf(id: string, ancestorId: string, byId: Map<string, GraphNod
 }
 
 /* ------------------------------- modals ----------------------------------- */
-
-export interface NewNodeForm {
-  kind: NodeKind;
-  title: string;
-  summary: string;
-  status: import("../lib/types").NodeStatus;
-  tags: string[];
-  /** A06: required by the backend for supported / not_supported nodes. */
-  scope?: string;
-  finding?: string;
-  decision?: string;
-  evidence?: { kind: "inline" | "url" | "path"; label: string; value: string; note: string }[];
-}
-
-function CreateNodeModal({
-  parentLabel,
-  err,
-  onClose,
-  onCreate,
-}: {
-  parentLabel: string;
-  err: string | null;
-  onClose: () => void;
-  onCreate: (f: NewNodeForm) => void | Promise<void>;
-}) {
-  const t = useT();
-  const [kind, setKind] = useState<import("../lib/types").NodeKind>("idea");
-  const [title, setTitle] = useState("");
-  const [summary, setSummary] = useState("");
-  const [status, setStatus] = useState<import("../lib/types").NodeStatus>("unexplored");
-  const [tags, setTags] = useState("");
-  const [scope, setScope] = useState("");
-  const [finding, setFinding] = useState("");
-  const [decision, setDecision] = useState("");
-  const [ev, setEv] = useState<{ kind: "inline" | "url" | "path"; label: string; value: string; note: string }[]>([]);
-  const [busy, setBusy] = useState(false);
-  const gated = status === "supported" || status === "not_supported";
-  const baseValid = title.trim().length >= 1 && title.trim().length <= 80;
-  const gatedValid =
-    !gated ||
-    (!!scope.trim() &&
-      !!finding.trim() &&
-      !!decision.trim() &&
-      ev.some((e) => e.label.trim() || e.value.trim()));
-  const valid = baseValid && gatedValid;
-  const submit = () => {
-    setBusy(true);
-    void Promise.resolve(
-      onCreate({
-        kind,
-        title: title.trim(),
-        summary: summary.trim(),
-        status,
-        tags: tags.split(/[,，]/).map((x) => x.trim()).filter(Boolean).slice(0, 10),
-        ...(gated
-          ? {
-              scope: scope.trim(),
-              finding: finding.trim(),
-              decision: decision.trim(),
-              evidence: ev.map((e) => ({ ...e })),
-            }
-          : {}),
-      }),
-    ).finally(() => setBusy(false));
-  };
-  const setEvRow = (i: number, patch: Partial<{ kind: "inline" | "url" | "path"; label: string; value: string; note: string }>) =>
-    setEv((rows) => rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  return (
-    <Modal title={t("modal.create.title", { parent: parentLabel })} onClose={onClose}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <select value={kind} onChange={(e) => setKind(e.target.value as NewNodeForm["kind"])}>
-          <option value="question">{t("kind.question")}</option>
-          <option value="idea">{t("kind.idea")}</option>
-          <option value="attempt">{t("kind.attempt")}</option>
-          <option value="finding">{t("kind.finding.long")}</option>
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value as NewNodeForm["status"])}>
-          {["unexplored", "in_progress", "promising", "supported", "not_supported", "inconclusive"].map((s) => (
-            <option key={s} value={s}>{statusLabel(s as import("../lib/types").NodeStatus)}</option>
-          ))}
-        </select>
-      </div>
-      <label className="field">{t("modal.field.title")}</label>
-      <input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} style={{ width: "100%" }} autoFocus />
-      <label className="field">{t("modal.field.summary")}</label>
-      <textarea value={summary} maxLength={280} onChange={(e) => setSummary(e.target.value)} style={{ width: "100%" }} />
-      <label className="field">{t("modal.field.tags")}</label>
-      <input value={tags} onChange={(e) => setTags(e.target.value)} style={{ width: "100%" }} />
-      {gated && (
-        <div className="gated-fields">
-          <div className="hint">{t("modal.gated.hint")}</div>
-          <label className="field">{t("modal.field.scope")}</label>
-          <textarea value={scope} maxLength={1000} onChange={(e) => setScope(e.target.value)} style={{ width: "100%" }} placeholder={t("modal.ph.scope")} />
-          <label className="field">{t("modal.field.finding")}</label>
-          <textarea value={finding} maxLength={2000} onChange={(e) => setFinding(e.target.value)} style={{ width: "100%" }} placeholder={t("modal.ph.finding")} />
-          <label className="field">{t("modal.field.decision")}</label>
-          <textarea value={decision} maxLength={2000} onChange={(e) => setDecision(e.target.value)} style={{ width: "100%" }} placeholder={t("modal.ph.decision")} />
-          <label className="field">{t("modal.field.evidence")}</label>
-          {ev.map((e, i) => (
-            <div className="evid-row gated-ev" key={i}>
-              <select value={e.kind} onChange={(evn) => setEvRow(i, { kind: evn.target.value as "inline" | "url" | "path" })}>
-                <option value="inline">{t("modal.ev.inline")}</option>
-                <option value="url">url</option>
-                <option value="path">{t("modal.ev.path")}</option>
-              </select>
-              <input value={e.label} maxLength={80} onChange={(evn) => setEvRow(i, { label: evn.target.value })} placeholder={t("modal.ev.label.ph")} />
-              <input value={e.value} maxLength={2000} onChange={(evn) => setEvRow(i, { value: evn.target.value })} placeholder={e.kind === "url" ? t("modal.ph.url") : e.kind === "path" ? t("modal.ph.path") : t("modal.ph.inline")} />
-              <button type="button" title={t("modal.ev.remove.title")} onClick={() => setEv((rows) => rows.filter((_, j) => j !== i))}>✕</button>
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => setEv((rows) => [...rows, { kind: "inline", label: "", value: "", note: "" }])}
-          >
-            {t("modal.ev.add")}
-          </button>
-        </div>
-      )}
-      {err && <div className="form-err">{err}</div>}
-      <div className="mrow">
-        <button onClick={onClose} disabled={busy}>{t("common.cancel")}</button>
-        <button className="primary" disabled={!valid || busy} onClick={submit}>
-          {busy ? t("modal.creating") : t("modal.create")}
-        </button>
-      </div>
-    </Modal>
-  );
-}
 
 function ProjectModal({
   mode,

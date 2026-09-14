@@ -144,6 +144,20 @@ export interface SidePanelProps {
     onRestore: (reason: string) => void;
   } | null;
 
+  /** C2: an in-progress node-create draft (canvas draft card of C3 edits the
+   *  same session). While set, the panel shows the create form instead of the
+   *  selected node's detail. */
+  createDraft: {
+    parentId: string | null;
+    parentLabel: string;
+    fields: Draft;
+    err: string | null;
+    busy: boolean;
+    onFields: (f: Draft) => void;
+    onSave: () => void;
+    onCancel: () => void;
+  } | null;
+
   history: {
     commits: CommitItem[];
     detail: CommitDetail | null;
@@ -160,34 +174,50 @@ export interface SidePanelProps {
 export default function SidePanel(p: SidePanelProps) {
   const t = useT();
   const n = p.node;
+  // C2: the create draft swaps the panel CONTENT but must not unmount the
+  // detail view — DetailTab keeps `editing` in local state, and unmounting it
+  // (early-return) would drop a user's open editor when they jot down a draft
+  // node mid-edit. Hidden ≠ cancelled: same rule as ResizablePanel.
   return (
     <aside className="side">
       <div className="head">
         <div className="tabs" style={{ padding: 0, borderTop: "none", marginBottom: -12 }}>
-          <button className={p.tab === "detail" ? "active" : ""} onClick={() => p.setTab("detail")}>
-            {t("tab.detail")}
-          </button>
-          <button className={p.tab === "relations" ? "active" : ""} onClick={() => p.setTab("relations")}>
-            {t("tab.relations")}
-          </button>
-          <button className={p.tab === "history" ? "active" : ""} onClick={() => p.setTab("history")}>
-            {t("tab.history")}
-          </button>
+          {p.createDraft ? (
+            <button className="active">{t("tab.detail")}</button>
+          ) : (
+            <>
+              <button className={p.tab === "detail" ? "active" : ""} onClick={() => p.setTab("detail")}>
+                {t("tab.detail")}
+              </button>
+              <button className={p.tab === "relations" ? "active" : ""} onClick={() => p.setTab("relations")}>
+                {t("tab.relations")}
+              </button>
+              <button className={p.tab === "history" ? "active" : ""} onClick={() => p.setTab("history")}>
+                {t("tab.history")}
+              </button>
+            </>
+          )}
         </div>
       </div>
-      {!n && (
-        <div className="body">
-          <div className="empty">
-            {p.loading ? t("panel.loading") : t("panel.empty.select")}
+      {p.createDraft && <CreateDraftTab draft={p.createDraft} />}
+      {/* C2: the wrapped detail stays mounted (hidden) so an in-progress edit
+          survives the draft session; e2e targets the draft pathline by testid
+          to dodge the hidden duplicate. */}
+      <div style={p.createDraft ? { display: "none" } : undefined}>
+        {!n && (
+          <div className="body">
+            <div className="empty">
+              {p.loading ? t("panel.loading") : t("panel.empty.select")}
+            </div>
+            <ProjectInfo project={p.project} />
           </div>
-          <ProjectInfo project={p.project} />
-        </div>
-      )}
-      {n && p.tab === "detail" && (
-        <DetailTab p={p} n={n} />
-      )}
-      {n && p.tab === "relations" && <RelationsTab p={p} n={n} />}
-      {n && p.tab === "history" && <HistoryTab n={n} history={p.history} />}
+        )}
+        {n && p.tab === "detail" && (
+          <DetailTab p={p} n={n} />
+        )}
+        {n && p.tab === "relations" && <RelationsTab p={p} n={n} />}
+        {n && p.tab === "history" && <HistoryTab n={n} history={p.history} />}
+      </div>
     </aside>
   );
 }
@@ -500,6 +530,65 @@ export function NodeFieldsForm({ d, set }: { d: Draft; set: (patch: Partial<Draf
           {t("edit.ev.add")}
         </button>
       )}
+    </div>
+  );
+}
+
+/* --------------------- node-create draft view (C2/C3) --------------------- */
+
+/** C2: side-panel half of the draft session — the full field set for an
+ *  unsaved node. The canvas draft card (C3) binds the same session for
+ *  title/kind/status/short summary. */
+function CreateDraftTab({
+  draft,
+}: {
+  draft: NonNullable<SidePanelProps["createDraft"]>;
+}) {
+  const t = useT();
+  const d = draft.fields;
+  const set = (patch: Partial<Draft>) => draft.onFields({ ...d, ...patch });
+  const missing: string[] = [];
+  if (d.status === "supported" || d.status === "not_supported") {
+    if (!d.scope.trim()) missing.push(t("fld.scope.gate"));
+    if (!d.finding.trim()) missing.push(t("fld.finding.gate"));
+    if (!d.decision.trim()) missing.push(t("fld.decision.gate"));
+    if (d.evidence.filter((e) => e.label.trim() || e.value.trim()).length === 0)
+      missing.push(t("fld.evidence.gate"));
+  }
+  // A06 客户端闸口：红/绿状态下缺要项时禁用创建（与服务端 _check_confirmed
+  // 同一闸口，与旧弹窗行为一致——点击前拦住，而不是等服务端 422）。
+  const blocked =
+    !d.title.trim() || draft.busy || (missing.length > 0 && (d.status === "supported" || d.status === "not_supported"));
+  return (
+    <div className="body">
+      <div className="pathline" data-testid="draft-pathline">
+        {draft.parentId ? (
+          <>
+            {t("ws.draft.under.parent")} {draft.parentLabel}
+          </>
+        ) : (
+          t("ws.draft.parent.root")
+        )}
+      </div>
+      <h2 style={{ marginBottom: 2 }} data-testid="draft-heading">
+        {t("ws.draft.heading")}
+        <span className="chip" style={{ marginLeft: 8 }}>{t("ws.draft.unsaved")}</span>
+      </h2>
+      {draft.err && <div className="hint err">{draft.err}</div>}
+      {missing.length > 0 && (
+        <div className="hint">
+          {t("detail.gate.hint", { status: statusLabel(d.status), items: missing.join(t("common.list.sep")) })}
+        </div>
+      )}
+      <NodeFieldsForm d={d} set={set} />
+      <div className="savebar">
+        <button className="primary" onClick={draft.onSave} disabled={blocked} data-testid="draft-save">
+          {draft.busy ? t("modal.creating") : t("modal.create")}
+        </button>
+        <button onClick={draft.onCancel} disabled={draft.busy}>
+          {t("detail.cancel.revert")}
+        </button>
+      </div>
     </div>
   );
 }

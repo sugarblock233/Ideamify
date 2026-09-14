@@ -102,7 +102,7 @@ export const en: Record<keyof typeof zh, string> = {
   "ws.confirm.switch.project": "Switching project, ",
   "ws.confirm.new.project": "Creating a new project leaves the current one, ",
   "ws.confirm.exit": "Exiting the current project, ",
-  "ws.created.rev": "Created (v{v})",
+  "ws.created.rev": "Created (record #{v})",
   "ws.saved.rev": "Saved (v{v})",
   "ws.create.fail": "Failed to create",
   "ws.no.change": "Records unchanged so far",
@@ -131,30 +131,15 @@ export const en: Record<keyof typeof zh, string> = {
   "common.cancel": "Cancel",
   "common.close": "Close",
   "common.top.level.option": "(project top-level nodes)",
+  "ws.draft.heading": "New node",
+  "ws.draft.unsaved": "Unsaved",
+  "ws.draft.under.parent": "Under:",
+  "ws.draft.parent.root": "Top-level route (parent: project root)",
 
-  // ---- CreateNodeModal -----------------------------------------------------------
-  "kind.finding.long": "Finding (observations / results)",
-  "modal.create.title": "New node · parent: {parent}",
-  "modal.field.title": "Title (1–80)",
-  "modal.field.summary": "Summary (one-sentence research increment, 0–280)",
-  "modal.field.tags": "Tags (comma-separated)",
-  "modal.gated.hint":
-    "For the statuses “supported / not supported” you must provide scope, finding and decision, plus at least 1 piece of evidence (same gate as the server).",
-  "modal.field.scope": "Scope (required, ≤1000)",
-  "modal.ph.scope": "Which materials / processes / conditions does this conclusion apply to",
-  "modal.field.finding": "Finding (required, ≤2000)",
-  "modal.ph.finding": "Observed facts and results, quantitative where possible",
-  "modal.field.decision": "Decision (required, ≤2000)",
-  "modal.ph.decision": "Adopt / drop / change which conditions, and why",
-  "modal.field.evidence": "Evidence (≥1 item)",
-  "modal.ev.inline": "Inline note",
-  "modal.ev.path": "Path",
-  "modal.ev.label.ph": "Name",
-  "modal.ph.url": "https://…",
-  "modal.ph.path": "Relative repo path",
-  "modal.ph.inline": "Content",
-  "modal.ev.remove.title": "Remove this evidence item",
-  "modal.ev.add": "＋ Add evidence",
+  // ---- create draft session (formerly CreateNodeModal) ------------------------------
+  // Keys modal.create / modal.creating stay in use on the draft save bar (C2);
+  // the old modal-only field labels died with the modal — the draft form reuses
+  // the edit.* field labels via NodeFieldsForm.
   "modal.create": "Create",
   "modal.creating": "Creating…",
 
