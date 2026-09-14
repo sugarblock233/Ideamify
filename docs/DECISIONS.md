@@ -54,26 +54,41 @@ SPEC 未规定、实现中被迫选定的事，逐条记在这里（含理由与
 - 落点：`Canvas.tsx`（`structKey` effect）、`Workspace.tsx` 的
   `structKey` 组合。
 
-## 7. CLI 的 `--base/--token` 是**子命令级**参数
-- `tools/researchmap.py` 每个子 parser 经 `common_args()` 各自携带
-  `--base/--token`（默认取 `RESEARCHMAP_*` 环境变量）。
-- **必须写在子命令后面**：`researchmap commit <pid> f.json --base …`；
-  写在子命令名前报 `unrecognized arguments`。
-- `--auto-rev`：提交前读一次当前 project，注入 `expected_revision`。
-- `commit` 在文件里**就地注入** `request_id`（标准 36 位 UUID）与
-  `expected_revision`（`--auto-rev` 时）。
-- 落点：`tools/researchmap.py`（`common_args`、`post`、`cmd_commit`）。
+## 7. CLI 的身份字段是**持久化**的（A05 修订）
+- `tools/researchmap.py` 的 `--base` 是**子命令级**参数（各子 parser 经
+  `common_args()` 携带）；**必须写在子命令后面**
+  （`researchmap commit <pid> f.json --base …`，写在子命令名前报
+  `unrecognized arguments`）。凭证只走环境变量：`RESEARCHMAP_BASE_URL`
+  （规格别名 `RESEARCHMAP_URL` 仅作回退）、`RESEARCHMAP_TOKEN`；
+  按合同（SPEC 7.3 / A05.6）令牌不出现在 argv，`--token` 已移除。
+- **commit 身份准备**：文件缺 `request_id` 或 `expected_revision` 时，
+  CLI 生成取值（revision 读自当前项目）并**原子回写进文件**（stderr 有人读
+  提示）。文件即"可重放工件"：重复同一条命令 = 逐字节相同请求 = 幂等
+  重放（`already_committed: true`）。
+- **字段一经存在绝不改动**，`--auto-rev` 也不例外（其旧语义"总是刷新
+  revision"已废弃；现在只表示"缺失才准备"）。过期的 `expected_revision`
+  会 409，由调用方重读地图后**显式重写文件**——CLI 不静默刷新，防止
+  "刷新版本绕过冲突"变成默认补救。
+- `--auto-rev` 与 `--dry-run` 均不落库；`dry_run=true` 只走查询参数，
+  从不写入文件。
+- 落点：`tools/researchmap.py`（`_prepare_identity`、`cmd_commit`、
+  `cmd_create_project` 的 `--file` 路径同样回写 `request_id`）。
 
 ## 8. 409 不落 row ⇒ 复用同一 request_id 合法
 - 版本冲突的提交**没有** Commit 记录；把同一 payload 以最新
   `expected_revision` 重发（可同 request_id）属于重试，不是复用。
-- 只有“同一 request_id **既已 commit** 又换了内容”才
+- 只有”同一 request_id **既已 commit** 又换了内容”才
   `IDEMPOTENCY_KEY_REUSED`。canonical hash 覆盖
-  `expected_revision/summary/client_label/operations`。
-- 因此：服务器 409 文案“保持相同 request_id”是对的；CLI 的
-  `REVISION_CONFLICT` 提示此前误写“用新的 request_id”，已统一。
+  `expected_revision/summary/client_label/operations`（`request_id` 与
+  `dry_run` 不在其中）。
+- 因此：服务器 409 文案”保持相同 request_id”是对的；CLI 的
+  `REVISION_CONFLICT` 提示此前误写”用新的 request_id”，已统一。
+- A05 修订后的措辞落点：409 指引不再作为散文追加在 JSON 之后，而是错误
+  JSON 对象里的 `hint` 字段；且 CLI 不会代刷文件里已持久化的
+  `expected_revision`（见 §7、§12）。
 - 落点：`backend/app/service.py`（submit 顺序：幂等→版本→操作→落
-  行）、`tools/researchmap.py:post`、`docs/ai-session-example.md` §4。
+  行）、`tools/researchmap.py`、`docs/ai-session-example.md` §4、
+  `docs/AI_USAGE.md` §3.2–3.3。
 
 ## 9. `details_md` → 受控 Markdown
 - `marked`（gfm:false, breaks:true）→ DOMPurify：
@@ -101,6 +116,33 @@ SPEC 未规定、实现中被迫选定的事，逐条记在这里（含理由与
   并跑 `integrity_check` + 计数核对；`restore` 要求 `--server-stopped
   --yes`，先验证源、再留下 `.pre-restore-<ts>` 现场、最后再验证。
 - 落点：`tools/backup.py`（`backup/verify/show/restore`）。
+
+## 12. CLI 与 AI 文档合同（A05/B05）
+- **为什么请求身份要持久化到文件**：dry-run、正式提交与网络重试必须共用
+  同一份完整请求体，否则"同一个命令跑两遍"会变成两个不同请求（验收
+  A05 复现的两个提交）。文件是最简单的可重放工件：生成一次、落盘一次、
+  之后逐字节重放即幂等。网络回执丢失时重发同一文件也是安全的。
+- **退出码表（稳定，`--help` 与 AI_USAGE 同文）**：0 成功；1 本地/用法
+  （坏文件、缺 `RESEARCHMAP_TOKEN`、argparse）；2 HTTP 409；3 HTTP 422；
+  4 网络失败或 5xx/503；5 其余非 2xx。
+- **机器可读输出合同**：stdout 成功时恰好一个 JSON 对象（服务器响应原样；
+  例外仅 `context --format markdown` 与 `graph --text`）；stderr 失败时
+  恰好一个 JSON 对象 `{"ok": false, "error": {status, code, message,
+  response}, "hint"?}`，其后不追加散文；人读提示（身份回写等）只走
+  stderr。
+- **凭证只走环境变量**（`RESEARCHMAP_BASE_URL` > `RESEARCHMAP_URL` 回退；
+  `RESEARCHMAP_TOKEN`）；`--token` 移除（令牌不得出现在 argv/文件/URL/
+  日志）。`--base` 保留为子命令级便捷覆盖。
+- **规格别名**：`--node`≡`--focus`、`--query`≡`--q`、`--output`≡`--out`、
+  `create-project --file` / `commit --file` 与位置参数并存、
+  `context --format json|markdown`（默认 json）。位置参数与 `--file` 严格
+  **二选一**：两种都给出（无论路径是否相同）→ `USAGE` 退出码 1。复核实测
+  发现旧实现会在双规格同值时静默接受并**真实落库**，已收紧。
+- **文档语言**：`docs/AI_USAGE.md` 为英文主入口，`docs/AI_USAGE.zh-CN.md`
+  为事实一致的中文对应版；examples 的方向/ID 准备说明以 AI_USAGE §7 为准
+  （提交文件本身是严格 JSON，不能携带备注字段）。
+- 落点：`tools/researchmap.py`、`docs/AI_USAGE.md`、
+  `docs/AI_USAGE.zh-CN.md`、`docs/ai-session-example.md`、`examples/*`。
 
 ## 尚未完成 / 未验证
 - **仅一项未验证**：`Dockerfile` + `compose.yaml` + `.env.example`

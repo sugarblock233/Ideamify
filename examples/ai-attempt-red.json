@@ -15,11 +15,28 @@
       "finding": "5 h 内出现二次成核（18.3° 次要峰），晶粒不均一",
       "decision": "放弃 140 ℃ 单段；改梯度程序并复查 120–130 ℃ 下界",
       "details_md": "## 条件\n- 140 ℃ × 5 h，升温 10 ℃/min\n- 前驱体：碘化物/甲胺混合 24 h\n\n## 观察\n- 批次一主相 >90%，另外两批偏低\n- SEM：次级晶核团簇 + 溶剂残留孔\n\n## 附件\n见 runs/exp-112/",
-      "tags": ["溶剂热", "成核", "负结果"],
+      "tags": [
+        "溶剂热",
+        "成核",
+        "负结果"
+      ],
       "evidence": [
-        { "kind": "inline", "label": "XRD", "value": "主相强度 41–88%（三批次），18.3° 二次峰", "note": "批次差异显著" },
-        { "kind": "path", "label": "SEM 图像", "value": "runs/exp-112/sem-140-5h-*.png" },
-        { "kind": "url", "label": "升温曲线", "value": "https://lab.local/data/exp112/ramp.csv" }
+        {
+          "kind": "inline",
+          "label": "XRD",
+          "value": "主相强度 41–88%（三批次），18.3° 二次峰",
+          "note": "批次差异显著"
+        },
+        {
+          "kind": "path",
+          "label": "SEM 图像",
+          "value": "runs/exp-112/sem-140-5h-*.png"
+        },
+        {
+          "kind": "url",
+          "label": "升温曲线",
+          "value": "https://lab.local/data/exp112/ramp.csv"
+        }
       ]
     },
     {
@@ -28,7 +45,7 @@
       "source_id": "a1000000-0000-4000-8000-000000000021",
       "target_id": "a1000000-0000-4000-8000-000000000011",
       "kind": "supports",
-      "reason": "成核过早的失败实例直接支持“成核温度下界”问题（下界应高于 120 ℃？需继续定位）"
+      "reason": "该失败实例（140 ℃ 单段 5 h）为「成核温度下界」问题提供首批证据：下界应高于 120 ℃，需继续定位"
     }
   ]
 }

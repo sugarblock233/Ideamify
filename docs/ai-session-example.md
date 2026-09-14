@@ -7,12 +7,18 @@
 | 项 | 值 |
 |----|----|
 | 服务器 | scratch uvicorn：`127.0.0.1:8123`，DB 在 `/tmp/rm-sim/data.db`，令牌仅存内存 |
-| AI 令牌 | `ai-sim-token-0001`（项目白名单 = 本项目） |
+| AI 令牌 | `ai-sim-token-0001`（环境变量 `RESEARCHMAP_TOKEN`；v0.1 无项目级白名单，所有有效令牌同处一个受信任空间） |
 | 研究者令牌 | `researcher-token-0001`（用于并发竞争演示） |
 | 项目 | `72da1aff-b001-4015-b4cf-e4d3fd2d6e28`（`create-project` 生成） |
 | 示例提交文件 | `examples/skeleton.json`、`examples/ai-attempt-red.json`、`examples/researcher-interlude.json`、`examples/ai-continue.json` |
 
 文中所有命令**均为实际执行**，输出为真实返回的节选（`…` 表示删减）。
+
+> **2026-09-14 A05 复核**：CLI 的身份字段（`request_id` /
+> `expected_revision`）改为**持久化进提交文件**、错误输出改为单一结构化
+> JSON 对象后，本文件的相关场景在新 scratch（`127.0.0.1:8131`，项目
+> `c7592461-…3148`）重跑了一遍。凡标 *（A05 复核重跑）* 的输出片段为
+> 当日重跑的真实输出；未标注的节选仍是原会话（8123）的真实记录。
 
 ## 时间线（按 revision）
 
@@ -37,18 +43,25 @@
 
 ## 1) 会话开场：身份与首读
 
-```console
-$ python3 tools/researchmap.py health --base http://127.0.0.1:8123
-{"status": "ok"}   # （实际输出略）
+凭证只走环境变量（CLI 不提供 `--token`，令牌不得出现在 argv/文件/日志）：
 
-$ python3 tools/researchmap.py session --base http://127.0.0.1:8123 --token ai-sim-token-0001
-{ "token": "ai-sim-token-0001", "client_label": "ai-sim", "allowed_project_ids": [ "72da1aff-…d6e28" ] }
+```console
+$ export RESEARCHMAP_BASE_URL=http://127.0.0.1:8123
+$ export RESEARCHMAP_TOKEN="ai-sim-token-0001"     # （A05：不再有 --token）
+$ python3 tools/researchmap.py health
+$ python3 tools/researchmap.py session
+{ "actor": "ai-sim-token-0001", "app_version": "0.1.0" }
+   # （A05 复核重跑核对过响应形状：actor = 服务器端配置的令牌名，app_version 为版本号。）
 ```
 
+注意 `session` 只回 **actor（= 令牌名）与 app_version**——服务器端判定
+身份；没有任何 `allowed_project_ids`/项目级授权的字段（v0.1 不存在项目
+级 403，见 `docs/AI_USAGE.md` §1.1）。
+
 ```console
-$ python3 tools/researchmap.py context --base http://127.0.0.1:8123 \
-      --token ai-sim-token-0001 72da1aff-b001-4015-b4cf-e4d3fd2d6e28 \
+$ python3 tools/researchmap.py context 72da1aff-b001-4015-b4cf-e4d3fd2d6e28 \
       --focus a1000000-0000-4000-8000-000000000011 --max-chars 12000
+# A05 复核重跑时 --node 与 --focus 等价（规格别名）；--format markdown 另有人读视图
 ```
 
 节选该响应（此时 `project_revision = 11`，`truncated: false`，`omitted_counts: {}`）：
@@ -64,7 +77,7 @@ $ python3 tools/researchmap.py context --base http://127.0.0.1:8123 \
   },
   "ancestor_path": [ { "id": "…0001", "title": "主线 A：溶剂热工艺窗口", "status": "进行中" } ],
   "related_nodes":  [ { "id": "…0021", "title": "140 ℃ 直接程序（5 h）：成核过早",
-                        "relation_kind": "supports", "side": "本节点→对方", … } ],
+                        "relation_kind": "supports", "side": "对方→本节点", … } ],
   "prior_attempts": [ { "id": "…0021", "status": "当前条件下不支持", … } ],
   "open_nodes":     [ { "title": "判据升级：PL 恢复率 + 接触角双指标" },
                       { "title": "接触角与 PL 恢复率哪个更先响应钝化度？" } ],
@@ -74,6 +87,8 @@ $ python3 tools/researchmap.py context --base http://127.0.0.1:8123 \
 
 注意 `related_nodes` 里的负结果带着 `relation_kind`/`side`/`reason`：AI 在
 换上下文之前**看见了之前的失败与它的来路**——这正是本产品的核心假设。
+`side` 以**焦点节点**为本位：关系从 …0021（失败尝试）指向 …0011（焦点），
+故为「对方→本节点」（A05 复核重跑时按同一条关系核对了该方向）。
 
 命中 0 的关键词也不会被谎报为“从未尝试”（`warnings` 会给出限定语）。
 
@@ -116,9 +131,11 @@ AI 想把一次失败记为“当前条件下不支持”，但漏填了 `decisi
       "details": { "missing": ["decision", "evidence"], "operation_index": 0 } }
 ```
 
-**没有任何 row 产生。** AI 补齐 `decision`（“放弃该单段工艺，改梯度程序并复查
-120–130 ℃ 下界”）与 `evidence`（XRD/SEM/附件）后重发同一 payload（新
-request_id），成功——这对应 rev2 的 `examples/ai-attempt-red.json`。
+**没有任何 row 产生。**（A05 合同下 CLI 以**退出码 3** 结束，stderr 是
+§5 同款的单一 JSON 对象；422→3、409→2、网络/5xx→4、其余非 2xx→5。）AI
+补齐 `decision`（“放弃该单段工艺，改梯度程序并复查 120–130 ℃ 下界”）与
+`evidence`（XRD/SEM/附件）后重发同一 payload（新 request_id），成功——这
+对应 rev2 的 `examples/ai-attempt-red.json`。
 
 ## 4) 幂等：原样重放 = 原回执；同 id 换内容 = 409
 
@@ -159,10 +176,16 @@ rev6 已记录的 request_id `8888…`，把其中任一字段改动后再提交
 就“不同内容”了？——分两种情况：
 
 - 之前那次**已经 commit 成功**：任何改动（包括只改 `expected_revision`）都会
-  触发 `IDEMPOTENCY_KEY_REUSED`。重试成功过的提交请用原回执，不要再生成。
+  触发 `IDEMPOTENCY_KEY_REUSED`。重试成功过的提交请按原字节重放原文件，不要
+  再“生成一次”——A05 之后 CLI 对文件里已存在的 `request_id` /
+  `expected_revision` **绝不调用再生器**（`--auto-rev` 只在字段**缺失**时
+  读取当前 revision 并**回写文件**；字段齐备时任何 CLI 路径都不会改它们）。
 - 之前那次**只是 409 REVISION_CONFLICT**（未落 row）：复用原 request_id 完全
-  合法，服务器不认得它。CLI 的 409 提示就是“重读后用 `--auto-rev` 重试，保留
-  原 request_id”。
+  合法，服务器不认得它。此时正确动作是**显式重写提交文件**（新的
+  `expected_revision`、按重读结果合并 operations），然后原样重提——CLI 不会
+  替你静默刷新文件里已持久化的 revision（防止“自动冲关”变成默认补术）。
+  409 提示现位于 stderr JSON 的 `hint` 字段（结构化指引，不再有 JSON 之后的
+  追加注释）。
 
 ## 5) 并行冲突：researcher 与 AI 同时编辑
 
@@ -178,13 +201,34 @@ t2  AI 落盘，expected_revision 仍是 8 →
       "details": { "expected_revision": 8, "current_revision": 9 } }
 ```
 
-CLI 向 stderr 打印机器可读提示；AI 标准动作：
+A05 复核重跑（stale `expected_revision=0`，当前 `current_revision=1`）时，
+失败侧 CLI 向 **stderr** 写**恰好一个** JSON 对象（其后不追加散文），退出
+码 **2**：
+
+```json
+{"ok": false, "error": {"status": 409, "code": "REVISION_CONFLICT",
+  "message": "项目版本不一致，请载入最新版本后重试（保持相同 request_id）",
+  "response": {"error": {"code": "REVISION_CONFLICT", "message": "…",
+  "details": {"expected_revision": 0, "current_revision": 1}}}},
+ "hint": "服务器版本已被推进；本次提交完全没有写入。请重新读取 context/"
+ "commits 弄清谁改了什么，然后显式重写提交文件：把 expected_revision 更新为"
+ "当前值并合并 operations 的冲突。409 未留下任何提交记录，因此保留原"
+ " request_id 重提是合法的。CLI 不会替你刷新文件里已有 revision…"}
+```
+
+AI 标准动作（冲突=协作，不是绕行）：
 
 ```console
-$ … commits 72da1aff-…            # 看 rev9 是谁改了什么
-$ … context --focus N11 …         # 重读
-$ … commit 72da1aff-… ai-stale.json --auto-rev     # 同一 request_id，新 rev
+$ … commits <PID> --limit 5            # 看中间进了什么
+$ … context --focus <节点> …           # 重读受影响的状态
+$ # 显式重写 ai-stale.json：expected_revision → 当前值，operations 按重读合并；
+$ # 409 未落 row，保留原 request_id 合法
+$ … commit <PID> ai-stale.json         # 200，同一 request_id 卷回来
 ```
+
+（原会话里这一步写作 `commit … --auto-rev`；A05 之后 `--auto-rev` 只负责
+“缺失才准备”，文件里已有的 revision 不会被 CLI 触碰，刷新必须由你显式写入
+文件——否则 409 会变成永远的“无谓重试”。）
 
 ```json
 { "commit_id": "8555f5a9-…", "request_id": "cccccccc-…0001",
@@ -215,11 +259,29 @@ $ … commit-detail 72da1aff-… <commit_id>
 
 1. 用 `--auto-rev` 重放一个**已记录**的 request_id：`expected_revision` 被
    刷新，hash 变化 → 正确地按 `IDEMPOTENCY_KEY_REUSED` 拒绝（§4b）。
+   （A05 之后 CLI 已不会代刷文件中已持久化的 revision，此误操作路径不复
+   存在——身份字段一经存在绝不改动。）
 2. 一个只产过 409（从未 commit）的 request_id 换内容再提：无 row 可查，
    相当于全新请求 → 正确地 200 接受（§4b 第二种情况）。
 
-**期间修复的 CLI 文档/提示**（服务器自身语义无改动）：
+**期间修复/改动的 CLI 文档与行为**（服务器语义无改动）：
 
-- CLI 409 提示原为“用新的 request_id 重试”，与服务器“保持同一
-  request_id”冲突；已统一为“重读 → `--auto-rev` → 保留原
-  request_id”。见 `tools/researchmap.py` 的 `post()` 与模块 docstring。
+- 409 提示原为“用新的 request_id 重试”，与服务器“保持同一 request_id”
+  冲突；已统一为“重读 → 显式重写文件 → 保留原 request_id 合法”。
+- **A05 合同（2026-09-14）**：`request_id`/`expected_revision` 缺失时由
+  CLI 生成并**回写进提交文件**（原子改写，人读提示走 stderr）；文件即
+  可重放工件，同命令重复执行 = 逐字节重放 = 幂等。`--auto-rev` 语义收敛
+  为“缺失才准备”；`--dry-run` 只加 `dry_run=true` 查询参数，从不写入文件。
+- 失败输出一律是 **stderr 单个 JSON 对象** `{"ok": false, "error": {...},
+  "hint"?}`；stdout 成功时恰好一个 JSON 对象。退出码 0/1/2/3/4/5 见
+  `--help` 与 `AI_USAGE.md` §1.3。
+- 凭证只走 `RESEARCHMAP_BASE_URL`/`RESEARCHMAP_TOKEN` 环境变量（令牌不再
+  出现在 argv，`--token` 移除）；`RESEARCHMAP_URL` 作为 `RESEARCHMAP_BASE_URL`
+  的回退别名。
+- context 增加 `--format json|markdown`（默认 json；markdown 为人读视图，
+  截断规则与 json 一致，含 omitted_counts/continuations 与 `node` 双读提示）；
+  `--node`/`--query` 为 `--focus`/`--q` 的规格别名；export 的 `--output` 为
+  `--out` 的别名。
+- commit / create-project 的位置参数与 `--file` 严格“二选一”：同一文件给
+  两遍（无论路径是否相同）也报 USAGE（退出码 1）——复核中发现双规格同值时
+  曾被静默接受并真实落库，已修复。
