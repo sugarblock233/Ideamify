@@ -18,12 +18,14 @@ Output contract (stable for automation):
            server response, emitted as-is. Exceptions: `context --format
            markdown` (documented human view) and `graph --text`.
            Human notes (e.g. "wrote missing id fields into your file") go
-           to stderr, never stdout.
-  stderr   on failure: exactly ONE JSON object, nothing appended after it:
+           to stderr on success, never stdout.
+  stderr   on failure: exactly ONE JSON object, nothing before or after it:
              {"ok": false,
               "error": {"status": <http status | null>, "code": <str>,
                         "message": <str>, "response": <server body | null>},
-              "hint": "<str, optional>"}
+              "hint": "<str, optional>",
+              "notes": ["<str>", …]}   # side effects that already happened,
+                                       # e.g. identity fields written back
            Chinese may appear inside string fields; the structure is fixed.
   exit     0  success (HTTP 2xx)
            1  local / usage error (bad file, missing token, argparse)
@@ -176,9 +178,24 @@ def emit(payload) -> None:
         print(str(payload))
 
 
+# A05/R06: human notes are buffered, not written straight through. The
+# convenience path writes identity fields back to the request file BEFORE the
+# HTTP call, so a note emitted there would sit on stderr ahead of the error
+# object if the call then failed — breaking "stderr on failure = exactly ONE
+# JSON object". Buffered notes are flushed on success and folded into the
+# error object (as `notes`) on failure.
+_PENDING_NOTES: list[str] = []
+
+
 def note(msg: str) -> None:
-    """Human note (stdout stays machine-only). One line, stderr."""
-    sys.stderr.write(msg + "\n")
+    """Human note (stdout stays machine-only). Deferred, see _PENDING_NOTES."""
+    _PENDING_NOTES.append(msg)
+
+
+def flush_notes() -> None:
+    """Emit buffered notes to stderr. Only ever called on a success path."""
+    while _PENDING_NOTES:
+        sys.stderr.write(_PENDING_NOTES.pop(0) + "\n")
 
 
 def _exit_for(status: int | None) -> int:
@@ -202,6 +219,11 @@ def fail(status: int | None, code: str, message: str,
                      "message": message, "response": response}}
     if hint:
         obj["hint"] = hint
+    if _PENDING_NOTES:
+        # Side effects that already happened (e.g. identity fields written back
+        # into the request file) belong in this object, not beside it.
+        obj["notes"] = list(_PENDING_NOTES)
+        _PENDING_NOTES.clear()
     sys.stderr.write(json.dumps(obj, ensure_ascii=False) + "\n")
     sys.exit(exit_code if exit_code is not None else _exit_for(status))
 
@@ -255,6 +277,7 @@ def respond(status: int, body) -> None:
     structured stderr JSON + mapped exit code."""
     if 200 <= status < 300:
         emit(body)
+        flush_notes()
         sys.exit(EXIT_OK)
     code: str | None = None
     message = ""
@@ -435,9 +458,28 @@ def cmd_commit_detail(args):
                     f"/api/v1/projects/{args.project_id}/commits/{args.commit_id}"))
 
 
+#: Analysis fields the server may attach to ANY context item, not just the
+#: focus node — prior_attempts and related_nodes carry them too (B05/R07). The
+#: markdown view must not quietly drop the very fields that say why an earlier
+#: attempt failed and under which conditions.
+_ITEM_FIELDS = (("scope", "适用条件"), ("finding", "直接观察"),
+                ("decision", "当前解释与决定"), ("tags", "标签"))
+
+
+def _item_detail_lines(d: dict, indent: str = "  ") -> list[str]:
+    return [f"{indent}- {label} {key}: {d[key]}" for key, label in _ITEM_FIELDS
+            if d.get(key)]
+
+
 def render_context_markdown(r: dict) -> str:
     """Human-readable rendering of the context response. Still carries
-    revision, node IDs, statuses, omitted counts and continuation entries."""
+    revision, node IDs, statuses, the data-not-instructions notice, omitted
+    counts and continuation entries.
+
+    Note: --max-chars is the budget for the JSON the server builds; this view
+    is a pure rendering of that JSON and is not itself re-limited, so its
+    length differs from max_chars. Truncation marks ("…[截断]") and every
+    omitted count come through unchanged."""
     L: list[str] = []
     p = r.get("project") or {}
     L.append(f"# ResearchMap 上下文：{p.get('name', '?')}")
@@ -453,9 +495,9 @@ def render_context_markdown(r: dict) -> str:
         L += ["", "## 焦点节点",
               f"- `{focus.get('id')}` {focus.get('kind', '')} "
               f"「{focus.get('title', '')}」 [{focus.get('status', '')}]"]
-        for k in ("scope", "summary", "finding", "decision", "tags"):
-            if focus.get(k):
-                L.append(f"- {k}: {focus[k]}")
+        if focus.get("summary"):
+            L.append(f"- 摘要 summary: {focus['summary']}")
+        L += _item_detail_lines(focus, indent="")
 
     if r.get("ancestor_path"):
         L += ["", "## 祖先路径（根 → 焦点）"]
@@ -485,6 +527,7 @@ def render_context_markdown(r: dict) -> str:
             if d.get("reason"):
                 line += f"｜原因：{d['reason']}"
             L.append(line)
+            L += _item_detail_lines(d)
 
     rc = r.get("recent_changes") or []
     if rc:
@@ -510,8 +553,12 @@ def render_context_markdown(r: dict) -> str:
         L += ["", "## 警告"]
         L += [f"- {w}" for w in warns]
 
+    if r.get("data_notice"):
+        L += ["", "## 数据声明", f"- {r['data_notice']}"]
+
     L += ["", "> 机器处理请改用 `--format json`（默认）；本视图仅供人读，"
-          "字段截断规则与 JSON 完全一致。"]
+          "字段截断规则与 JSON 完全一致（`--max-chars` 限制的是服务端构造的 "
+          "JSON，本视图不再二次限流，篇幅会与该数值不同）。"]
     return "\n".join(L) + "\n"
 
 
@@ -750,6 +797,9 @@ def main(argv=None):
     args = p.parse_args(argv)
     try:
         args.fn(args)
+        # Commands that return instead of exiting through respond() (markdown
+        # context, --text graph, export --out) still owe their notes.
+        flush_notes()
     except NetError as e:
         fail(None, e.code, str(e), hint=_hint(None, e.code))  # exit 4
     except SystemExit:
