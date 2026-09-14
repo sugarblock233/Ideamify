@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import uuid
 from typing import Any, Optional
 
 import sqlalchemy.exc
@@ -382,13 +383,33 @@ def list_commits(pid: str,
                  after_revision: int = Query(default=0, ge=0),
                  node_id: Optional[str] = None,
                  limit: int = Query(default=PAGE_DEFAULT, ge=1, le=PAGE_MAX),
-                 cursor: Optional[str] = None) -> dict:
+                 cursor: Optional[str] = None,
+                 before: Optional[str] = None) -> dict:
+    """分页变更历史；传 node_id 即“节点历史”（> limit 条可取尽）。
+
+    分页（本响应即文档）：按 revision 降序；取下一页时回传
+    `?cursor=<next_cursor>`（携带版本戳，翻页期间项目发生提交 -> 409
+    PAGINATION_STALE，要求重新分页）或 `?before=<next_before>`（本页最后一条
+    commit id，取严格更早的提交；revision 号不可变，不受项目后续写入影响）。
+    两者都提供时返回 400。默认（不带参数）行为不变：最新 limit（50）条。
+    """
     with read_session() as s:
         p = _get_project_row(s, pid)
         q = select(Commit).where(Commit.project_id == pid, Commit.revision > after_revision)
         if node_id:
             q = q.join(CommitNode, CommitNode.commit_id == Commit.id
                        ).where(CommitNode.node_id == node_id)
+        if cursor is not None and before is not None:
+            raise err(400, "BAD_CURSOR", "cursor 与 before 不要同时提供（二选一即可取下一页）")
+        if before is not None:
+            try:
+                uuid.UUID(before)
+            except ValueError:
+                raise err(400, "BAD_BEFORE", "before 需为 commit id（UUID）")
+            bc = s.get(Commit, before)
+            if bc is None or bc.project_id != pid:
+                raise not_found("before 指向的提交不存在或不属于该项目")
+            q = q.where(Commit.revision < bc.revision)
         if cursor:
             c = _dec_cursor(cursor)
             if str(c.get("v")) != str(p.revision):
@@ -401,7 +422,10 @@ def list_commits(pid: str,
         items = [_commit_item(c, _commit_node_ids(s, c.id)) for c in page]
         next_cursor = (_enc_cursor({"v": p.revision, "rev": page[-1].revision})
                        if has_more and page else None)
-        return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+        # next_before: 本页最后一条的 commit id，作为下一页的 `before` 光标。
+        next_before = (page[-1].id if has_more and page else None)
+        return {"items": items, "next_cursor": next_cursor,
+                "next_before": next_before, "has_more": has_more}
 
 
 @router.get("/projects/{pid}/commits/{cid}")
@@ -474,8 +498,10 @@ def export_project(pid: str) -> dict:
 @router.get("/projects/{pid}/context")
 def get_context(pid: str,
                 focus_node_id: Optional[str] = None,
-                q: Optional[str] = None,
+                q: Optional[str] = Query(default=None, max_length=100),
                 max_chars: int = Query(default=12000, ge=4000, le=50000)) -> dict:
+    # q 与 /search 相同的确定性关键词规则（上限 100，/search 可接受）；
+    # 返回的 continuations 会把 q 做 URL 编码后可直接复跑。
     from .context import build_context
     return build_context(pid, focus_node_id, q, max_chars)
 
