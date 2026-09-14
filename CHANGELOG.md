@@ -10,11 +10,20 @@ All notable changes to Ideamify are documented in this file.
 - The database's `schema_version` is an independent data-format concept and
   does **not** track the software version; they move for different reasons
   and are never bumped together blindly.
-- **No tags have been published as of this commit.** A release is pending the
-  owner's decision (see G10 in `docs/QWEN_EXECUTION_PLAN.md`); the `Unreleased`
-  section below is the working record until a tag exists.
+- **`v0.1.0` is published** (2026-09-14, tagged on the commit whose CI run
+  passed 5/5). It is marked a *pre-release* on GitHub to match this 0.x framing.
+  Everything that predates the tag is folded into the `[0.1.0]` section below;
+  `Unreleased` collects what comes after it.
 
 ## [Unreleased]
+
+Nothing since `v0.1.0`.
+
+## [0.1.0] — 2026-09-14
+
+First published release: tagged `v0.1.0` at the commit whose CI run passed 5/5,
+with the Git tag pushed and a GitHub pre-release created. The sections below
+are the working record that produced it.
 
 This batch completes the acceptance-fix and contribution-readiness plan
 (`docs/QWEN_EXECUTION_PLAN.md`); per-item status and evidence are recorded in

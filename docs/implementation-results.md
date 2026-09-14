@@ -380,4 +380,52 @@ gh api repos/sugarblock233/Ideamify        # 读回核对
 
 ### 9.5 tag 与 Release
 
-见本文件末尾的「发布状态」小节（写入时以 `git tag` / `gh release view` 的读回值为准）。
+tag 打在**远端 CI 已全绿的那个提交**上（不是「当前工作区状态」上），随后
+用 `gh release create --prerelease --verify-tag` 发布；`--verify-tag` 保证
+Release 指向的是已推送的 tag，而不是 GitHub 临时补建的一个。
+
+```bash
+git tag -a v0.1.0 e1042610bac5a77b17be18023a0026403535e34c \
+  -m "Ideamify v0.1.0 — ResearchMap, first release"
+git push origin v0.1.0
+gh release create v0.1.0 --title "Ideamify v0.1.0 — ResearchMap, first release" \
+  --notes-file /tmp/rm-release-notes.md --prerelease --verify-tag
+```
+
+读回值（`git cat-file` / `git ls-remote` / `gh release view --json`）：
+
+| 项 | 读回值 |
+| --- | --- |
+| tag 名 | `v0.1.0`（annotated tag 对象 `43b51433…`） |
+| tag 指向的提交 | `e1042610bac5a77b17be18023a0026403535e34c`（`v0.1.0^{}` 与本地一致） |
+| tagger | `sugarblock233 <sugarblock233@users.noreply.github.com>` |
+| 远端 tag | `refs/tags/v0.1.0` 存在，解引用后与本地同一提交 |
+| Release | `https://github.com/sugarblock233/Ideamify/releases/tag/v0.1.0` |
+| `isPrerelease` | `true` |
+| `isDraft` | `false` |
+| `targetCommitish` | `main` |
+| `createdAt` / `publishedAt` | `2026-09-14T07:20:52Z` / `2026-09-14T07:21:05Z` |
+
+Release 标为 **pre-release**，与本仓库自己的 0.x 表述一致（README「预发布
+（0.x）阶段：修复勤快但无稳定性承诺」、release notes 的 "early 0.x"）。
+Release notes 全文见 `/tmp/rm-release-notes.md`（写入本文件时未入库；如需
+长期保存应另存为 `docs/` 下的文件并随文档一起提交）。
+
+`CHANGELOG.md` 已同步：`Unreleased` 现在是空的，发布前的全部内容折叠进
+`## [0.1.0] — 2026-09-14`，并删除了此前那句已不成立的
+「No tags have been published as of this commit」。
+
+### 9.6 仍待所有者决定的事项
+
+- **`main` 分支 ruleset**：本轮**没有**创建。理由是时序——所有者在刚授权
+  一次 force push 之后，若立刻布一条通常禁止 force push 的 ruleset，会与
+  刚执行的操作自相矛盾；是否设、设多严（要求 PR？要求 CI 通过？允许谁
+  force push？）属于所有者对仓库治理的决定，不由本轮代做。当前 ruleset
+  数量读回为 0。
+- **存量提交的尾注**：已由所有者决定「全部 15 个都改写（含已发布的
+  `1c5677e`）」，已执行并 force push（见 9.1/9.2），远端现存 34 个提交、
+  尾注 0 处。
+- **node20 action 弃用告警**：CI 全绿，但 Actions 提示 `actions/checkout` /
+  `setup-node` / `setup-python` 被钉住的 SHA 仍声明 node20 运行时，GitHub
+  强制它们跑在 node24 上（见 §6-8）。这是依赖升级，不影响本版结论，留待
+  后续批次——不在发布前动 CI 引脚。
