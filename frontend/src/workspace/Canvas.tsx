@@ -33,6 +33,11 @@ import { deepLinkHref } from "../lib/deeplink";
 export const nodeTypes = { card: NodeCard, root: RootCard };
 const edgeTypes = { relation: RelationEdge };
 
+/** A03/R03: the zoom at which a 280px card's body text is actually readable.
+ *  First open and search-locate both land here, so "readable" means one thing
+ *  in this app rather than being re-derived per entry point. */
+export const READABLE_ZOOM = 0.7;
+
 const VIEW_KEY = (pid: string) => `rm.view.${pid}`;
 interface SavedView {
   folds: string[];
@@ -142,6 +147,14 @@ function Inner(p: CanvasProps) {
         id: rootId,
         type: "root",
         position: { x: pos.x, y: pos.y },
+        // R03: cards are fixed-size by construction (layout reserves CARD_W ×
+        // CARD_H). Stating that here matters beyond documentation: this is a
+        // controlled `nodes` prop with no onNodesChange, so React Flow can
+        // never write measured dimensions back — and anything reading
+        // node.measured, the MiniMap included, would otherwise skip every node
+        // and render an empty box.
+        width: pos.width,
+        height: pos.height,
         draggable: false,
         connectable: false,
         selectable: false,
@@ -160,6 +173,8 @@ function Inner(p: CanvasProps) {
         id: n.id,
         type: "card",
         position: { x: pos.x, y: pos.y },
+        width: pos.width,
+        height: pos.height,
         draggable: false,
         connectable: false,
         data: {
@@ -258,7 +273,7 @@ function Inner(p: CanvasProps) {
     }
     const vp = flow.getViewport();
     flow.setCenter(pos.x + CARD_W / 2, pos.y + CARD_H / 2, {
-      zoom: Math.max(vp.zoom, 0.7),
+      zoom: Math.max(vp.zoom, READABLE_ZOOM),
       duration: 280,
     });
     p.onLocated();
@@ -273,11 +288,17 @@ function Inner(p: CanvasProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.fitSignal]);
 
-  // ---- initial viewport (saved, or fit to root + top-level routes) ----------
-  // A03: first open without a saved view fits ONLY the virtual root plus the
-  // first-level routes, so the default viewport stays legible on large trees
-  // instead of zooming the whole tree into unreadability. Fires once, and
-  // waits for the first non-trivial layout (the graph may arrive post-mount).
+  // ---- initial viewport (saved, or readable zoom anchored on the root) ------
+  // A03/R03: first open without a saved view anchors on the virtual root at a
+  // FIXED readable zoom. Fitting the root+routes bounding box (the previous
+  // behaviour) cannot work: with two levels expanded, d3's sibling axis spreads
+  // top-level routes by the size of their subtrees, so that box runs to
+  // thousands of px and any true fit lands far below reading size — which the
+  // old Math.max(0.4, …) floor then silently overrode, producing a viewport
+  // that was neither fitted nor legible. Readability wins; the rest of the map
+  // is one pan away, or one click on 「适应当前图」.
+  // Fires once, and waits for the first non-trivial layout (the graph may
+  // arrive post-mount).
   const paneRef = useRef<HTMLDivElement | null>(null);
   const onInit = useCallback(() => {
     if (readyRef.current) return;
@@ -294,30 +315,38 @@ function Inner(p: CanvasProps) {
       flow.setViewport(saved, { duration: 0 });
       return;
     }
-    const rootId = rootIdOf(p.projectId);
-    const ids = [
-      rootId,
-      ...p.graph
-        .filter((g) => (p.branchRoot ? g.id === p.branchRoot : g.parent_id === null))
-        .map((g) => g.id),
-    ];
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const id of ids) {
-      const pl = layout.positions.get(id);
-      if (!pl) continue;
-      minX = Math.min(minX, pl.x);
-      maxX = Math.max(maxX, pl.x + pl.width);
-      minY = Math.min(minY, pl.y);
-      maxY = Math.max(maxY, pl.y + pl.height);
-    }
-    if (minX === Infinity) return;
+    const anchorId = p.branchRoot ?? rootIdOf(p.projectId);
+    const anchor = layout.positions.get(anchorId);
+    if (!anchor) return;
     const w = paneRef.current?.clientWidth || 1000;
     const h = paneRef.current?.clientHeight || 700;
-    const bw = Math.max(maxX - minX, 1);
-    const bh = Math.max(maxY - minY, 1);
-    const zoom = Math.max(0.4, Math.min(1, Math.min(w / bw, h / bh) * 0.92));
+    const zoom = READABLE_ZOOM;
+    const anchorCx = anchor.x + CARD_W / 2;
+    const anchorCy = anchor.y + CARD_H / 2;
+
+    // d3 places each route at the centre of its own subtree, so on a wide map
+    // the nearest route can sit most of a screen away from the anchor. Aim the
+    // camera at the midpoint of the two — which shows both whenever they fit —
+    // but never further than keeps that route fully on screen. Routes beyond
+    // it are one pan (or 「适应当前图」) away.
+    let nearest = Infinity;
+    for (const n of p.graph) {
+      if (p.branchRoot ? n.parent_id !== p.branchRoot : n.parent_id !== null) continue;
+      const pos = layout.positions.get(n.id);
+      if (!pos) continue;
+      const d = pos.y + CARD_H / 2 - anchorCy;
+      if (Math.abs(d) < Math.abs(nearest)) nearest = d;
+    }
+    // layout px from the camera centre to the centre of a fully-visible card
+    const reach = Math.max(h / (2 * zoom) - CARD_H / 2, 0);
+    const shift = Number.isFinite(nearest)
+      ? Math.max(nearest - reach, Math.min(nearest + reach, nearest / 2))
+      : 0;
+
+    // Bias the anchor left of centre: routes hang off it to the right (depth
+    // axis), so they deserve the bulk of the viewport width.
     flow.setViewport(
-      { x: w / 2 - (minX + bw / 2) * zoom, y: h / 2 - (minY + bh / 2) * zoom, zoom },
+      { x: w * 0.25 - anchorCx * zoom, y: h / 2 - (anchorCy + shift) * zoom, zoom },
       { duration: 0 },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -361,9 +390,19 @@ function Inner(p: CanvasProps) {
         proOptions={{ hideAttribution: false }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} color="#c9ced6" />
+        {/* Portrait, and no taller than the default: a left-to-right tree grows
+            far taller than it is wide, so a landscape minimap spends most of
+            its width on padding — but the widget floats over the canvas and
+            swallows clicks, so its footprint must not grow either. */}
         <MiniMap
           pannable
           zoomable
+          style={{ width: 120, height: 150 }}
+          maskColor="rgba(29,36,48,0.12)"
+          maskStrokeColor="#5c6675"
+          maskStrokeWidth={2}
+          nodeStrokeColor="#5c6675"
+          nodeStrokeWidth={40}
           nodeColor={(n) => {
             if (n.type === "root") return "#9fb0c3";
             const d = (n.data as CardData)?.node;
