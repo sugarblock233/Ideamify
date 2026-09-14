@@ -86,7 +86,9 @@ test("A03 首次打开：三层树只显示前两级，第三层折叠隐藏", a
   await expect(page.locator(".rm-card").first()).toBeVisible({ timeout: 20_000 });
   // 只有 A（一级）+ B（二级，带折叠按钮）；C（三级）不在画布上
   await expect(page.locator(".rm-card")).toHaveCount(2);
-  await expect(page.getByText("三层C")).toHaveCount(0);
+  // 限定在画布卡片内：裸 getByText("三层C") 会同时命中卡片、面包屑与详情标题，
+  // 触发 Playwright 严格模式冲突（R04）。
+  await expect(page.locator(".rm-card", { hasText: "三层C" })).toHaveCount(0);
   // B 的折叠按钮显示隐藏子节点数 +1
   const foldBtn = page
     .locator(".rm-card", { hasText: "三层B" })
@@ -102,21 +104,58 @@ test("A03 折叠可往返：展开第三层，再折叠收回", async ({ page })
   const foldBtn = () =>
     page.locator(".rm-card", { hasText: "三层B" }).first().locator(".fold-btn");
   await foldBtn().click();
-  await expect(page.getByText("三层C")).toBeVisible({ timeout: 10_000 });
+  const cardC = page.locator(".rm-card", { hasText: "三层C" });
+  await expect(cardC).toHaveCount(1, { timeout: 10_000 });
+  await expect(cardC).toBeVisible();
   await expect(page.locator(".rm-card")).toHaveCount(3);
   await foldBtn().click();
-  await expect(page.getByText("三层C")).toHaveCount(0);
+  await expect(cardC).toHaveCount(0);
   await expect(page.locator(".rm-card")).toHaveCount(2);
 });
 
 test("A07 节点深链接：自动展开祖先链并定位选中", async ({ page }) => {
   const s = await seedDeepTree(page);
   await enterStudio(page, s.pid, s.c); // /p/{pid}?node={c}
-  await expect(page.getByText("三层C")).toBeVisible({ timeout: 20_000 });
+  // 画布卡片与详情标题分开断言：裸 getByText 同时命中两者会触发严格模式冲突（R04）。
+  await expect(page.locator(".rm-card", { hasText: "三层C" })).toBeVisible({ timeout: 20_000 });
   // 祖先全部展开：A、B、C 三张卡都在
   await expect(page.locator(".rm-card")).toHaveCount(3);
   // 详情面板选中 C
   await expect(page.locator("h2", { hasText: "三层C" }).first()).toBeVisible();
+});
+
+/** R01：有未保存草稿时，「退出」「新建项目」这类真正的离开动作必须先确认；
+ *  取消后草稿逐字保留、人留在原地，确认后才真的离开。 */
+test("A02 离开确认：退出与新建项目都必须先确认，取消后草稿原样保留", async ({ page }) => {
+  const s = await seedDeepTree(page);
+  await enterStudio(page, s.pid);
+  await page.locator(".rm-card", { hasText: "三层A" }).first().click();
+  await page.getByRole("button", { name: "编辑" }).click();
+  const summaryBox = page.locator("textarea").first();
+  const DRAFT = "R01-草稿：退出前必须提醒我";
+  await summaryBox.fill(DRAFT);
+  await expect(page.locator(".hint", { hasText: "有未保存的修改" }).first()).toBeVisible();
+
+  // ---- 退出：取消 → 留在原地，草稿一字不变 ----
+  let asked = "";
+  page.once("dialog", (d) => { asked = d.message(); void d.dismiss(); });
+  await page.getByRole("button", { name: "退出" }).click();
+  expect(asked).toContain("有未保存的草稿");
+  await expect(page.locator("select.project-sel")).toHaveValue(s.pid);
+  await expect(summaryBox).toHaveValue(DRAFT);
+
+  // ---- 新建项目：同一道闸口，取消后不弹建项目弹窗 ----
+  asked = "";
+  page.once("dialog", (d) => { asked = d.message(); void d.dismiss(); });
+  await page.getByRole("button", { name: "+ 项目", exact: true }).click();
+  expect(asked).toContain("有未保存的草稿");
+  await expect(page.locator(".modal")).toHaveCount(0);
+  await expect(summaryBox).toHaveValue(DRAFT);
+
+  // ---- 退出：确认 → 真的回到令牌闸门 ----
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "退出" }).click();
+  await expect(page.getByPlaceholder("访问令牌（Bearer token）")).toBeVisible({ timeout: 10_000 });
 });
 
 test("A02 同字段并发提交：409 冲突 → 保留草稿 → 重排合并 → 保存", async ({ page }) => {
@@ -176,11 +215,25 @@ test("A02 同字段并发提交：409 冲突 → 保留草稿 → 重排合并 �
   ).toBeVisible({ timeout: 10_000 });
   await expect(summaryBox).toHaveValue(LOCAL);
 
-  // ---- 「载入新版并重排草稿」：同字段冲突保留本地值并提示核对 ----
+  // ---- 「载入新版并重排草稿」：同字段冲突进入三方比较，未处理前不可保存 ----
   await page.getByRole("button", { name: "载入新版并重排草稿" }).click();
   await expect(
     page.locator(".hint.err", { hasText: "已保留你的值" }).first(),
   ).toBeVisible({ timeout: 10_000 });
+  await expect(summaryBox).toHaveValue(LOCAL);
+
+  // R02：冲突字段展示 读取时 / 你的草稿 / 服务器 三份内容，而不是一行文字提示
+  const row = page.locator(".conflict-field", { hasText: "摘要" });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".conflict-col pre").nth(0)).toHaveText("基线摘要");
+  await expect(row.locator(".conflict-col pre").nth(1)).toHaveText(LOCAL);
+  await expect(row.locator(".conflict-col pre").nth(2)).toHaveText(REMOTE);
+  // 未选择前保存被挡住（不能把未核对的同字段冲突当作已解决提交）
+  await expect(page.getByRole("button", { name: "保存" })).toBeDisabled();
+
+  // ---- 选择「保留我的」→ 冲突消失，可保存 ----
+  await row.getByRole("button", { name: "保留我的" }).click();
+  await expect(page.locator(".conflict-field")).toHaveCount(0);
   await expect(summaryBox).toHaveValue(LOCAL);
 
   // ---- 再保存：成功，读视图与服务器值 = 本地保留值 ----
