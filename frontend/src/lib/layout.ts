@@ -265,3 +265,100 @@ export function initialFolds(nodes: GraphNode[]): Set<string> {
   }
   return out;
 }
+
+/* --------------------------- C3: draft placement --------------------------- */
+
+/** The unsaved create-draft card is a canvas overlay, not a tree node: same
+ *  card width, but roomier (kind/status selects + title + summary + actions). */
+export const DRAFT_W = CARD_W;
+export const DRAFT_H = 200;
+
+export interface DraftPlacement {
+  x: number;
+  y: number;
+  /** id of the visible card the draft docks to and the temp edge starts from
+   *  (the parent itself, its nearest visible ancestor when folded away, or
+   *  the virtual root for top-level drafts). */
+  anchorId: string;
+}
+
+/** C3: deterministic canvas spot for the unsaved draft card (plan §10.3).
+ *
+ *  - child draft (h): one column right of its anchor at the anchor's row —
+ *    the column where its siblings live; (v): one row below the anchor.
+ *  - top-level draft: one row/column BELOW/AFTER the LAST visible top-level
+ *    route, never between two routes.
+ *  - Overlaps walk down (h) / right (v) in 12px steps until the draft rect is
+ *    clear of every placed card. Same (positions, parentId) ⇒ same spot.
+ *
+ *  Returns null on an empty canvas — there is nothing to dock to yet; callers
+ *  render the draft only in the side panel in that case. */
+export function draftPlacement(
+  positions: Map<string, PlacedNode>,
+  parentId: string | null,
+  /** the parent's ancestor chain, nearest first (folded-parent fallback) */
+  ancestorsOf: (id: string) => string[],
+  rootId: string,
+  mode: "h" | "v",
+  tops: { x: number; y: number }[],
+): DraftPlacement | null {
+  if (positions.size === 0) return null;
+  let anchor: PlacedNode | undefined;
+  if (parentId) {
+    anchor = positions.get(parentId);
+    if (!anchor) {
+      for (const a of ancestorsOf(parentId)) {
+        anchor = positions.get(a);
+        if (anchor) break;
+      }
+    }
+  }
+  if (!anchor) anchor = positions.get(rootId);
+  if (!anchor) return null; // anchor card not on canvas; nothing to dock to
+  // tops ordered like the tree (caller sorts); "last" = farthest on the
+  // sibling axis, which for both orientations is the max canvas coordinate.
+  const lastTop =
+    mode === "v"
+      ? tops.reduce((m, p0) => (p0.x > m.x ? p0 : m), tops[0] ?? anchor)
+      : tops.reduce((m, p0) => (p0.y > m.y ? p0 : m), tops[0] ?? anchor);
+
+  let x: number;
+  let y: number;
+  if (parentId) {
+    // 96 ≈ the h groove (380 − 280) minus a nudge; keeps the draft visually
+    // inside the parent's column airspace instead of hugging the next column.
+    x = mode === "v" ? anchor.x : anchor.x + CARD_W + 96;
+    y = mode === "v" ? anchor.y + CARD_H + 96 : anchor.y;
+  } else {
+    x = mode === "v" ? lastTop.x + CARD_W + 96 : lastTop.x;
+    y = mode === "v" ? lastTop.y : lastTop.y + CARD_H + 96;
+  }
+  const clear = (): boolean => {
+    for (const pos of positions.values()) {
+      if (
+        x < pos.x + pos.width &&
+        pos.x < x + DRAFT_W &&
+        y < pos.y + pos.height &&
+        pos.y < y + DRAFT_H
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // Bounded walk: determinism over premise — 240 steps × 12px outruns any
+  // realistic column; if it ever gives up the draft may overlap, never vanish.
+  for (let i = 0; i < 240 && !clear(); i++) {
+    if (mode === "v") x += 12;
+    else y += 12;
+  }
+  return {
+    x,
+    y,
+    anchorId: parentId
+      ? anchor.id === rootId
+        ? rootId
+        : anchor.id
+      : rootId,
+  };
+}

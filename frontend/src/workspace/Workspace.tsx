@@ -23,6 +23,7 @@ import {
 } from "../lib/types";
 import { useT } from "../lib/i18n";
 import { replaceDeepLink } from "../lib/deeplink";
+import { kindLabel, statusLabel } from "../lib/format";
 import Canvas from "./Canvas";
 import {
   loadLayoutView,
@@ -882,6 +883,11 @@ async function rebaseDraft() {
 
   const cancelNodeDraft = useCallback(() => setNodeDraft(null), []);
 
+  /** Partial update from either editor (canvas DraftCard / side panel form). */
+  const patchNodeDraftFields = useCallback((patch: Partial<Draft>) => {
+    setNodeDraft((s) => (s ? { ...s, fields: { ...s.fields, ...patch } } : s));
+  }, []);
+
   /** §10.1/§10.2: submit the create draft. The op mirrors the old modal's
    *  createNodeAction payload (A06 gate included); on failure the session is
    *  KEPT with its pinned request id, so a retry resumes instead of creating
@@ -1203,6 +1209,14 @@ async function rebaseDraft() {
               pendingLocate={pendingLocate}
               onLocated={() => setPendingLocate(null)}
               projectName={project?.name ?? "…"}
+              draft={nodeDraft
+                ? {
+                    parentId: nodeDraft.parentId,
+                    title: nodeDraft.fields.title.trim(),
+                    kind: kindLabel(nodeDraft.fields.kind),
+                    status: statusLabel(nodeDraft.fields.status),
+                  }
+                : null}
             />
           ) : (
             <Canvas
@@ -1231,6 +1245,19 @@ async function rebaseDraft() {
             density={density}
             lowInterference={lowInterference}
             mode={layout}
+            nodeDraft={nodeDraft
+              ? {
+                  id: nodeDraft.id,
+                  parentId: nodeDraft.parentId,
+                  fields: nodeDraft.fields,
+                  busy: nodeDraft.busy,
+                  err: nodeDraft.err,
+                }
+              : null}
+            unsavedId={dirty && !nodeDraft ? selectedId : null}
+            onDraftFields={patchNodeDraftFields}
+            onDraftSave={() => void commitNodeDraft()}
+            onDraftCancel={cancelNodeDraft}
           />
           )}
           {toast && <div className={`toast ${toast.kind === "err" ? "err" : "ok"}`}>{toast.msg}</div>}
@@ -1305,7 +1332,7 @@ async function rebaseDraft() {
                   fields: nodeDraft.fields,
                   err: nodeDraft.err,
                   busy: nodeDraft.busy,
-                  onFields: (f) => setNodeDraft((s) => (s ? { ...s, fields: f } : s)),
+                  onFields: patchNodeDraftFields,
                   onSave: () => void commitNodeDraft(),
                   onCancel: cancelNodeDraft,
                 }

@@ -129,6 +129,42 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .rm-card.archived .title, .rm-card.archived .summary { color: var(--ink-dim); }
 .arch-pill { font-size: 10px; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
 
+/* C3: unsaved create-draft card — a dashed ghost of a real card. Translucent
+   ground (12% tint) so the dots of the pane read through: this state does not
+   exist on the server yet. Interactive surface, unlike .rm-card. */
+.rm-draft {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1.5px dashed var(--card-edge);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(20, 30, 50, 0.08);
+  padding: 8px 10px 6px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  overflow: hidden;
+  cursor: default;
+}
+.rm-draft.busy { opacity: 0.7; pointer-events: none; }
+.rm-draft .row1 { display: flex; align-items: center; gap: 6px; }
+.rm-draft select {
+  font-size: 11px; padding: 1px 2px; max-width: 96px;
+  border: 1px solid var(--line); border-radius: 4px; background: #fff;
+}
+.rm-draft .chip { margin-left: auto; }
+.rm-draft textarea {
+  font-family: inherit; font-size: 12px; line-height: 1.35;
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 2px 5px; resize: none; width: 100%;
+}
+.rm-draft .draft-title { font-weight: 600; }
+.rm-draft .draft-summary { color: var(--ink-dim); flex: 1; }
+.rm-draft .draft-err {
+  font-size: 11px; color: var(--st-red);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rm-draft .draft-actions { display: flex; align-items: center; gap: 6px; }
+.rm-draft .draft-actions .primary { padding: 2px 10px; font-size: 12px; }
+.rm-draft .draft-actions button { padding: 1px 8px; font-size: 12px; }
+.rm-draft .draft-hint { font-size: 10px; color: var(--ink-dim); margin-right: auto; }
+
 .rm-card .row1 { display: flex; align-items: center; gap: 6px; min-height: 18px; }
 .kind-badge {
   font-size: 11px; color: var(--ink-dim);
@@ -172,8 +208,13 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
   padding: 1px 6px; border-radius: 8px;
 }
 .new-badge {
+  position: absolute; top: -9px; right: 12px;  background: var(--st-blue); color: #fff; font-size: 10px;
+  padding: 1px 6px; border-radius: 8px;
+}
+/* C3 §10.2: the card of the node carrying an unsaved edit draft. */
+.unsaved-badge {
   position: absolute; top: -9px; right: 12px;
-  background: var(--st-blue); color: #fff; font-size: 10px;
+  background: #767f8d; color: #fff; font-size: 10px;
   padding: 1px 6px; border-radius: 8px;
 }
 
@@ -552,3 +593,15 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .outline-title { font-weight: 550; overflow-wrap: anywhere; }
 .outline-tags { display: inline-flex; gap: 4px; overflow: hidden; margin-left: 4px; }
 .outline-row.flash { animation: rm-flash 1.6s ease 2; }
+/* C3: the unsaved draft in 大纲 is a read-only dashed row (honest downgrade:
+ * the outline never hosts inline editing). The session itself survives across
+ * layouts — only this presentation is read-only. */
+.outline-row.draft {
+  border: 1.5px dashed var(--card-edge);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink-dim);
+  cursor: default;
+  margin: 2px 0;
+  max-width: calc(100% - 24px);
+}

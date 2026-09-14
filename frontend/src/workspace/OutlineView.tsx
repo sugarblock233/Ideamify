@@ -28,6 +28,11 @@ export interface OutlineViewProps {
   pendingLocate: { nodeId: string } | null;
   onLocated: () => void;
   projectName: string;
+  /** C3: the open node-create draft, shown as a read-only dashed row right
+   *  after its parent's row (top-level drafts go last). Omitted when the
+   *  parent's row is not rendered (folded away / branch-filtered) — the draft
+   *  still lives in the side panel; the outline only mirrors visible rows. */
+  draft: { parentId: string | null; title: string; kind: string; status: string } | null;
 }
 
 /** Structural slice of buildTreeData's TreeLeaf (unexported there). */
@@ -98,57 +103,98 @@ export default function OutlineView(p: OutlineViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.pendingLocate, rows]);
 
+  // C3: rows plus the read-only draft row. The draft renders right after its
+  // parent's row at depth+1 (top-level: last, depth 0); if the parent's row
+  // is not in the outline (folded away / branch-filtered) the draft is not
+  // rendered either — the side panel remains its editor.
+  const viewRows: (OutlineRow | { draftMarker: true; depth: number })[] = useMemo(() => {
+    if (!p.draft) return rows;
+    const out: (OutlineRow | { draftMarker: true; depth: number })[] = [];
+    let placed = false;
+    for (const r of rows) {
+      out.push(r);
+      if (p.draft.parentId === r.id) {
+        out.push({ draftMarker: true, depth: r.depth + 1 });
+        placed = true;
+      }
+    }
+    if (!placed && p.draft.parentId === null) {
+      out.push({ draftMarker: true, depth: 0 });
+      placed = true;
+    }
+    return placed ? out : rows;
+  }, [rows, p.draft]);
+
   return (
     <div className="outline-wrap" data-testid="outline-view" ref={wrapRef}>
       <div className="outline-head">
         <span className="outline-glyph" aria-hidden>◆</span>
         {p.projectName}
       </div>
-      {rows.map((r) => (
+      {viewRows.map((entry) =>
+        "draftMarker" in entry ? (
+          /* The draft row mirrors the side panel's unsaved session; clicking
+             it edits nothing (plan §10.3: outline hosts no inline editing). */
+          <div
+            key="draft"
+            className="outline-row draft"
+            style={{ paddingLeft: 18 + entry.depth * 22 }}
+          >
+            <span className="outline-status" aria-hidden>
+              <span className="dot" style={{ background: "var(--ink-dim)" }} />
+            </span>
+            <span className="outline-kind">{entry.depth >= 0 ? p.draft!.kind : ""}</span>
+            <span className="outline-title" style={{ maxWidth: Math.round(CARD_W * 2.4) }}>
+              {p.draft!.title || t("ws.draft.heading")}
+            </span>
+            <span className="chip">{t("ws.draft.unsaved")}</span>
+          </div>
+        ) : (
         <div
-          key={r.id}
-          data-outline-id={r.id}
-          className={`outline-row${p.selectedId === r.id ? " selected" : ""}`}
-          style={{ paddingLeft: 18 + r.depth * 22 }}
-          onClick={() => p.onSelect(r.id)}
+          key={entry.id}
+          data-outline-id={entry.id}
+          className={`outline-row${p.selectedId === entry.id ? " selected" : ""}`}
+          style={{ paddingLeft: 18 + entry.depth * 22 }}
+          onClick={() => p.onSelect(entry.id)}
         >
-          {r.hasChildren && (
+          {entry.hasChildren && (
             <button
               className="fold-btn ofold"
-              title={r.folded
-                ? t("node.fold.expand.title", { n: r.hiddenDirect })
+              title={entry.folded
+                ? t("node.fold.expand.title", { n: entry.hiddenDirect })
                 : t("node.fold.collapse.title")}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                p.onToggleFold(r.id);
+                p.onToggleFold(entry.id);
               }}
             >
-              {r.folded ? `+${r.hiddenDirect}` : "–"}
+              {entry.folded ? `+${entry.hiddenDirect}` : "–"}
             </button>
           )}
-          <span className="outline-status" title={statusLabel(r.node.status)}>
-            <span className="dot" style={{ background: STATUS_COLOR[r.node.status] }} />
+          <span className="outline-status" title={statusLabel(entry.node.status)}>
+            <span className="dot" style={{ background: STATUS_COLOR[entry.node.status] }} />
             <span
               className="outline-glyph"
               aria-hidden
-              style={{ color: STATUS_COLOR[r.node.status] }}
+              style={{ color: STATUS_COLOR[entry.node.status] }}
             >
-              {STATUS_GLYPH[r.node.status]}
+              {STATUS_GLYPH[entry.node.status]}
             </span>
           </span>
-          <span className="outline-kind">{kindLabel(r.node.kind)}</span>
+          <span className="outline-kind">{kindLabel(entry.node.kind)}</span>
           <span className="outline-title" style={{ maxWidth: Math.round(CARD_W * 2.4) }}>
-            {r.node.title}
+            {entry.node.title}
           </span>
-          {r.node.archived && <span className="arch-pill">{t("node.archived")}</span>}
+          {entry.node.archived && <span className="arch-pill">{t("node.archived")}</span>}
           <span className="outline-tags">
-            {r.node.tags.slice(0, 3).map((tag) => (
+            {entry.node.tags.slice(0, 3).map((tag) => (
               <span className="tag" key={tag}>{tag}</span>
             ))}
           </span>
         </div>
-      ))}
+        )
+      )}
     </div>
   );
 }

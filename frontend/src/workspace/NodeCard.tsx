@@ -24,6 +24,10 @@ export interface CardData extends Record<string, unknown> {
   hiddenCount: number;
   hasChildren: boolean;
   mark?: "new" | "changed" | undefined;
+  /** C3 §10.2: the selected node carries this unsaved edit draft → show a
+   *  未保存 flag on the card itself, so the live-edit state is visible on the
+   *  map and not only in the panel. */
+  unsaved?: boolean;
   badgeCount?: number;
   tier?: DetailTier;
   low?: boolean;
@@ -85,6 +89,7 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
           {d.mark === "new" ? t("node.mark.new") : t("node.mark.changed")}
         </span>
       )}
+      {d.unsaved && <span className="unsaved-badge">{t("ws.draft.unsaved")}</span>}
       {d.badgeCount ? (
         <span className="update-badge" style={{ right: d.mark ? 64 : 12 }}>
           {t("node.badge.updates", { n: d.badgeCount })}

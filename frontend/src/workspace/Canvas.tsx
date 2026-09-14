@@ -25,7 +25,7 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import { computeLayout, CARD_W, CARD_H, rootIdOf, type LayoutResult } from "../lib/layout";
+import { computeLayout, draftPlacement, CARD_W, CARD_H, DRAFT_W, DRAFT_H, rootIdOf, type LayoutResult } from "../lib/layout";
 import { STATUS_COLOR, STATUS_GLYPH } from "../lib/format";
 import { resolveTier, type DetailTier } from "../lib/detailLevel";
 import type { DensityMode, LayoutMode } from "../lib/viewPrefs";
@@ -33,12 +33,14 @@ import type { GraphNode, NodeStatus, Project, RelationItem } from "../lib/types"
 import { selectCanvasRelations } from "../lib/relations";
 import { NodeCard, type CardData } from "./NodeCard";
 import { RootCard, type RootData } from "./RootCard";
+import { DraftCard, type DraftData } from "./DraftCard";
+import type { Draft } from "./SidePanel";
 import OverviewLabels, { type OverviewLabelItem } from "./OverviewLabels";
 import { RelationEdge, makeRelEdge } from "./RelationEdge";
 import { deepLinkHref } from "../lib/deeplink";
 import { useT } from "../lib/i18n";
 
-export const nodeTypes = { card: NodeCard, root: RootCard };
+export const nodeTypes = { card: NodeCard, root: RootCard, draft: DraftCard };
 const edgeTypes = { relation: RelationEdge };
 
 /** A03/R03: the zoom at which a 280px card's body text is actually readable.
@@ -83,6 +85,16 @@ export interface CanvasProps {
   /** B2: layout strategy ("h"/"v" here; "outline" renders its own list view
    *  and is defensively mapped to "h" should it ever reach Canvas). */
   mode: LayoutMode;
+  /** C3: the open node-create draft session (null when none). Canvas renders
+   *  it as a dashed overlay card docked next to its parent plus a dashed temp
+   *  edge; the card and the side panel edit the same session. */
+  nodeDraft: { id: string; parentId: string | null; fields: Draft; busy: boolean; err: string | null } | null;
+  /** C3 §10.2: the node currently carrying an unsaved edit draft (selected +
+   *  dirty) → its card shows a 未保存 badge while the panel holds the draft. */
+  unsavedId: string | null;
+  onDraftFields: (patch: Partial<Draft>) => void;
+  onDraftSave: () => void;
+  onDraftCancel: () => void;
 }
 
 function Inner(p: CanvasProps) {
@@ -210,6 +222,7 @@ function Inner(p: CanvasProps) {
           hasChildren: n.child_count > 0 || pos.hiddenCount > 0,
           mark,
           badgeCount: p.marks.badges.get(n.id),
+          unsaved: n.id === p.unsavedId,
           tier,
           low: p.lowInterference,
           v: treeMode === "v",
@@ -218,10 +231,57 @@ function Inner(p: CanvasProps) {
         } as CardData,
       });
     }
+    // C3: the unsaved draft card. Not part of the tree layout — docked next to
+    // its parent (or its parent's nearest visible ancestor when folded away),
+    // so it never perturbs layout coordinates, and the draft disappears with
+    // the session whether it is saved (becomes a real card) or cancelled.
+    if (p.nodeDraft && layout.positions.size > 0) {
+      const byId = new Map(p.graph.map((g) => [g.id, g]));
+      const ancestorsOf = (id: string): string[] => {
+        const chain: string[] = [];
+        let cur = byId.get(id)?.parent_id ?? null;
+        while (cur) {
+          chain.push(cur);
+          cur = byId.get(cur)?.parent_id ?? null;
+        }
+        return chain;
+      };
+      // Visible first-level cards, canonical order — the "last route" a
+      // top-level draft docks below (plan §10.3).
+      const tops = p.graph
+        .filter((n) =>
+          p.branchRoot ? n.parent_id === p.branchRoot : n.parent_id === null,
+        )
+        .sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id))
+        .map((n) => ({ x: layout.positions.get(n.id)?.x ?? 0, y: layout.positions.get(n.id)?.y ?? 0 }))
+        .filter((pt) => pt.x || pt.y || layout.positions.size === 1);
+      const spot = draftPlacement(layout.positions, p.nodeDraft.parentId, ancestorsOf, rootId, treeMode, tops);
+      if (spot) {
+        out.push({
+          id: p.nodeDraft.id,
+          type: "draft",
+          position: { x: spot.x, y: spot.y },
+          width: DRAFT_W,
+          height: DRAFT_H,
+          draggable: false,
+          connectable: false,
+          selectable: false,
+          data: {
+            d: p.nodeDraft.fields,
+            busy: p.nodeDraft.busy,
+            err: p.nodeDraft.err,
+            v: treeMode === "v",
+            onFields: p.onDraftFields,
+            onSave: p.onDraftSave,
+            onCancel: p.onDraftCancel,
+          } as DraftData,
+        });
+      }
+    }
     return out;
     // structKey covers graph/folds/branchRoot; marks/relations refresh data
     // without needing structural bookkeeping.
-  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, onToggleFold, onCtx, tier, p.lowInterference, treeMode]);
+  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, p.unsavedId, onToggleFold, onCtx, tier, p.lowInterference, treeMode, p.nodeDraft, p.branchRoot, p.onDraftFields, p.onDraftSave, p.onDraftCancel]);
 
   // Selected node's direct relations eligible for canvas lines (≤ MAX_CANVAS_RELATION).
   const shownRels = useMemo(() => {
@@ -304,8 +364,28 @@ function Inner(p: CanvasProps) {
         );
       }
     }
+    // C3: dashed temp edge holding the draft to its anchor. Cosmetic only —
+    // the draft becomes the real tree edge once its commit lands.
+    const draft = p.nodeDraft;
+    if (draft && nodes.some((n) => n.id === draft.id)) {
+      const byId = new Map(p.graph.map((g) => [g.id, g]));
+      let anchor = draft.parentId;
+      while (anchor && !layout.positions.has(anchor)) {
+        anchor = byId.get(anchor)?.parent_id ?? null;
+      }
+      const source = anchor ?? rootId;
+      if (layout.positions.has(source)) {
+        out.push({
+          id: `t:${draft.id}`,
+          source,
+          target: draft.id,
+          type: "default",
+          style: { strokeDasharray: "4 4", opacity: 0.65 },
+        });
+      }
+    }
     return out;
-  }, [layout, p.graph, p.selectedId, p.selectedRelationId, p.relations, hoveredRel, p.onPickRelation, p.projectId, shownRels, p.lowInterference]);
+  }, [layout, p.graph, p.selectedId, p.selectedRelationId, p.relations, hoveredRel, p.onPickRelation, p.projectId, shownRels, p.lowInterference, p.nodeDraft, nodes]);
 
   // ---- viewport stability --------------------------------------------------
   useEffect(() => {
@@ -442,7 +522,12 @@ function Inner(p: CanvasProps) {
   const clearCtx = useCallback(() => setCtxMenu(null), []);
 
   const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node) => p.onSelect(node.id),
+    (_: React.MouseEvent, node: Node) => {
+      // C3: the draft card is not a node — selecting it would 404 the node
+      // endpoint; its edit surface is the card itself (and the side panel).
+      if (node.type === "draft") return;
+      p.onSelect(node.id);
+    },
     [p.onSelect],
   );
   const onPaneClick = useCallback(() => {

@@ -11,6 +11,11 @@ import {
   buildTreeData,
   cardsOverlap,
   computeLayout,
+  draftPlacement,
+  CARD_W,
+  CARD_H,
+  DRAFT_H,
+  DRAFT_W,
   NODE_SIZE,
   NODE_SIZE_V,
   rootIdOf,
@@ -196,5 +201,81 @@ describe("buildTreeData (folded-ancestor visibility)", () => {
     expect(root).not.toBeNull();
     expect(visibleIds.has("a2x")).toBe(false);
     expect(visibleIds.has("a2")).toBe(true);
+  });
+});
+
+describe.each<LayoutMode>(["h", "v"])("draftPlacement ×%s (C3)", (mode) => {
+  const layoutOf = (folds: ReadonlySet<string> = new Set(), branchRoot: string | null = null) =>
+    computeLayout(PID, tree(), folds, branchRoot, mode);
+  const rootId = rootIdOf(PID);
+
+  it("docks a child draft beside its parent, clear of every placed card", () => {
+    const { positions } = layoutOf();
+    const anc = (id: string): string[] => {
+      const byId = new Map(tree().map((n) => [n.id, n]));
+      const chain: string[] = [];
+      let cur = byId.get(id)?.parent_id ?? null;
+      while (cur) { chain.push(cur); cur = byId.get(cur)?.parent_id ?? null; }
+      return chain;
+    };
+    const tops = ["a", "b", "c"].map((id) => positions.get(id)!);
+    const spot = draftPlacement(positions, "c", anc, rootId, mode as "h" | "v", tops);
+    expect(spot).not.toBeNull();
+    const s = spot!;
+    expect(s.anchorId).toBe("c");
+    // in the anchor's span direction: h → right of c, v → below c
+    if (mode === "h") {
+      expect(s.x).toBeGreaterThanOrEqual(tops[2].x + CARD_W);
+      expect(s.y).toBeGreaterThanOrEqual(tops[2].y);
+    } else {
+      expect(s.y).toBeGreaterThanOrEqual(tops[2].y + CARD_H);
+      expect(s.x).toBeGreaterThanOrEqual(tops[2].x);
+    }
+    // clear of all cards
+    const rect = { x: s.x, y: s.y, width: DRAFT_W, height: DRAFT_H };
+    for (const pos of positions.values()) {
+      expect(
+        rect.x < pos.x + pos.width && pos.x < rect.x + rect.width &&
+        rect.y < pos.y + pos.height && pos.y < rect.y + rect.height,
+      ).toBe(false);
+    }
+  });
+
+  it("docks a top-level draft after the LAST route, not between routes", () => {
+    const { positions } = layoutOf();
+    const anc = () => [] as string[];
+    const tops = ["a", "b", "c"].map((id) => positions.get(id)!);
+    const spot = draftPlacement(positions, null, anc, rootId, mode as "h" | "v", tops)!;
+    // h: below the last route's row; v: right of the last route's column
+    if (mode === "h") expect(spot.y).toBeGreaterThan(tops[2].y);
+    else expect(spot.x).toBeGreaterThan(tops[2].x);
+    expect(spot.anchorId).toBe(rootId);
+  });
+
+  it("falls back to an ancestor when the parent is folded away", () => {
+    // fold a2 → a2's subtree hidden; a draft under a2x must dock at a2's
+    // nearest visible ancestor (a2 itself stays visible under a fold of a —
+    // so fold "a" instead, which hides a1/a2/a2x behind a's fold button).
+    const { positions, visibleIds } = layoutOf(new Set(["a"]));
+    expect(visibleIds.has("a2x")).toBe(false);
+    const anc = (id: string): string[] => {
+      const byId = new Map(tree().map((n) => [n.id, n]));
+      const chain: string[] = [];
+      let cur = byId.get(id)?.parent_id ?? null;
+      while (cur) { chain.push(cur); cur = byId.get(cur)?.parent_id ?? null; }
+      return chain;
+    };
+    const tops = ["a", "b", "c"].map((tid) => positions.get(tid)!);
+    const spot = draftPlacement(positions, "a2x", anc, rootId, mode as "h" | "v", tops)!;
+    expect(spot.anchorId).toBe("a"); // nearest visible ancestor on canvas
+  });
+
+  it("is deterministic: same inputs, same spot", () => {
+    const { positions } = layoutOf();
+    const anc = () => [] as string[];
+    const tops = ["a", "b", "c"].map((id) => positions.get(id)!);
+    const s1 = draftPlacement(positions, "b", anc, rootId, mode as "h" | "v", tops);
+    const s2 = draftPlacement(positions, "b", anc, rootId, mode as "h" | "v", tops);
+    expect(s1).toEqual(s2);
   });
 });
