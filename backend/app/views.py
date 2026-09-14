@@ -475,8 +475,11 @@ def export_project(pid: str) -> dict:
                               .order_by(Relation.id)).all())
         commits = list(s.scalars(select(Commit).where(Commit.project_id == pid)
                                  .order_by(Commit.revision.asc())).all())
+        # D4: 附件元数据随导出（字节文件不入 JSON 导出——进备份包，见 docs/DECISIONS §18）
+        atts = list(s.scalars(select(Attachment).where(Attachment.project_id == pid)
+                              .order_by(Attachment.created_at, Attachment.id)).all())
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "exported_at": now_utc(),
             "project_revision": p.revision,
             "project": {"id": p.id, "name": p.name, "objective": p.objective,
@@ -496,12 +499,14 @@ def export_project(pid: str) -> dict:
                  "summary": c.summary, "created_at": c.created_at,
                  "operations": _lj(c.operations_json), "changes": _lj(c.changes_json)}
                 for c in commits],
+            "attachments": [_att_record(a) for a in atts],
             "counts": {
                 "nodes": len(nodes),
                 "nodes_archived": sum(1 for n in nodes if n.archived),
                 "relations": len(rels),
                 "relations_archived": sum(1 for r in rels if r.archived),
                 "commits": len(commits),
+                "attachments": len(atts),
                 },
         }
 

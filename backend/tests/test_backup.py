@@ -10,7 +10,10 @@ So: a source without the schema is an error, and a real WAL source (rows written
 but not checkpointed) must still produce a complete single-file copy.
 """
 
+import base64
+import hashlib
 import importlib.util
+import json
 import shutil
 import sqlite3
 import subprocess
@@ -138,6 +141,83 @@ def test_backup_from_a_live_wal_source_keeps_uncheckpointed_rows(tmp_path):
 
     v = _run("verify", str(copies[0]))
     assert v.returncode == 0 and "verify 通过" in v.stdout
+
+
+# --------------------------- attachments (D4) -------------------------------
+
+ATT_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def _db_with_attachments(path: Path, storage: Path, rows=("a1", "a2")) -> Path:
+    """有 attachments 表的库 + 对应字节目录（a2 故意缺文件，验证 manifest 记账）。"""
+    con = sqlite3.connect(path)
+    _create_schema(con)
+    con.execute("CREATE TABLE attachments (id TEXT PRIMARY KEY, project_id TEXT, "
+                "mime TEXT, bytes INTEGER, sha256 TEXT, width INTEGER, height INTEGER, "
+                "original_name TEXT, state TEXT, created_by TEXT, created_at TEXT)")
+    for rid in rows:
+        con.execute("INSERT INTO attachments VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (rid, "p1", "image/png", len(ATT_PNG),
+                     hashlib.sha256(b"x" if rid == "a2" else ATT_PNG).hexdigest(),
+                     1, 1, "fig.png", "staged", "tester", "2026-09-15T00:00:00Z"))
+    con.commit()
+    con.close()
+    (storage / "a1").write_bytes(ATT_PNG)
+    return path
+
+
+def test_backup_copies_attachment_bytes_with_manifest(tmp_path):
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "live.db", storage)
+    out = tmp_path / "out"
+
+    r = _run("backup", "--db", str(src), "--out", str(out), "--storage", str(storage))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1/2 个文件入包" in r.stdout
+
+    copied = out / "attachments" / "a1"
+    assert copied.read_bytes() == ATT_PNG
+
+    mf = json.loads(next(out.glob("attachments-manifest-*.json")).read_text(encoding="utf-8"))
+    statuses = {f["id"]: (f["status"], f["ok"]) for f in mf["files"]}
+    assert statuses == {"a1": ("ok", True), "a2": ("missing", False)}
+    assert mf["files"][0]["sha256"] == hashlib.sha256(ATT_PNG).hexdigest()
+
+
+def test_backup_without_attachment_table_skips_the_directory(tmp_path):
+    src = _schema_db(tmp_path / "old.db")
+    out = tmp_path / "out"
+    r = _run("backup", "--db", str(src), "--out", str(out))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (out / "attachments").exists()
+
+
+def test_backup_warns_when_storage_dir_is_missing(tmp_path):
+    storage = tmp_path / "ghost-storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "live.db", storage)
+    shutil.rmtree(storage)  # 库里有元数据、字节目录被整目录删掉的情形
+    out = tmp_path / "out"
+    r = _run("backup", "--db", str(src), "--out", str(out))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "字节未入备份包" in r.stderr
+    assert not (out / "attachments").exists()
+
+
+def test_restore_reports_attachment_coverage_hint(tmp_path):
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "backup.db", storage)
+    dst = _schema_db(tmp_path / "data.db")
+    r = _run("restore", "--src", str(src), "--dst", str(dst),
+             "--storage", str(storage), "--server-stopped", "--yes")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 条元数据" not in r.stdout  # rows=2
+    assert "2 条元数据" in r.stdout and "命中 1 个文件" in r.stdout
+    assert "随备份包一起恢复" in r.stdout
 
 
 # ------------------------------- restore gate -------------------------------

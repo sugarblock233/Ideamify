@@ -29,6 +29,9 @@ import urllib.request
 from datetime import datetime, timezone
 
 SCHEMA_TABLES = ("projects", "nodes", "relations", "commits")
+# D4: attachments 表在迁移 0002 之后才存在——旧库副本 verify 不因缺它失败，
+# 只在新库上计入。
+OPTIONAL_TABLES = ("attachments",)
 
 
 def ts() -> str:
@@ -69,6 +72,11 @@ def check_db(path: str) -> dict:
             except sqlite3.OperationalError:
                 counts[t] = "缺表"
                 missing.append(t)
+        for t in OPTIONAL_TABLES:
+            try:
+                counts[t] = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except sqlite3.OperationalError:
+                counts[t] = "旧库（迁移 0002 前）"
         if missing:
             raise SystemExit(
                 f"缺表：{path} 里没有 {', '.join(missing)}——这不是一个"
@@ -103,6 +111,68 @@ def cmd_show(args) -> None:
         return
     for pid, name, rev, upd in rows:
         print(f"  {pid}  rev={rev}  updated={upd}  {name[:48]}")
+
+
+def attachment_rows(db_path: str) -> list[dict]:
+    """读出 attachments 元数据行（旧库无此表则返回空）。"""
+    con = open_ro(db_path)
+    try:
+        try:
+            cols = [r[1] for r in con.execute("PRAGMA table_info(attachments)")]
+            if not cols:
+                return []
+            rows = con.execute(
+                "SELECT id, project_id, mime, bytes, sha256, state, created_at "
+                "FROM attachments ORDER BY created_at, id").fetchall()
+        except sqlite3.OperationalError:
+            return []
+    finally:
+        con.close()
+    keys = ("id", "project_id", "mime", "bytes", "sha256", "state", "created_at")
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def copy_attachments(db_path: str, storage_dir: str | None, out_dir: str, stamp: str) -> dict | None:
+    """D4: 附件字节随备份包拷到 <out>/attachments/，manifest 落 JSON。
+
+    完整性按行内 sha256 核对副本字节；缺失/损坏**只记录不中断**（备份尽量
+    带走能带走的），manifest 里逐文件记录 ok/missing/mismatch。旧库或未配置
+    storage 时返回 None（不产出附件目录）。
+    """
+    rows = attachment_rows(db_path)
+    if not rows:
+        return None
+    if not storage_dir or not os.path.isdir(storage_dir):
+        print(f"警告：库内有 {len(rows)} 条附件元数据，但附件目录不可用"
+              f"（{storage_dir or '未配置 --storage'}），字节未入备份包。",
+              file=sys.stderr)
+        return None
+    att_dir = os.path.join(out_dir, "attachments")
+    os.makedirs(att_dir, exist_ok=True)
+    import hashlib
+    manifest = {"stamp": stamp, "source_storage": storage_dir, "files": []}
+    for r in rows:
+        src = os.path.join(storage_dir, r["id"])
+        entry = {**r, "ok": False}
+        if not os.path.isfile(src):
+            entry["status"] = "missing"
+        else:
+            data = open(src, "rb").read()
+            digest = hashlib.sha256(data).hexdigest()
+            if digest != r["sha256"]:
+                entry["status"] = "mismatch"
+            else:
+                with open(os.path.join(att_dir, r["id"]), "wb") as f:
+                    f.write(data)
+                entry["status"] = "ok"
+                entry["ok"] = True
+        manifest["files"].append(entry)
+    mpath = os.path.join(out_dir, f"attachments-manifest-{stamp}.json")
+    with open(mpath, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, ensure_ascii=False, indent=2)
+    n_ok = sum(1 for x in manifest["files"] if x["ok"])
+    print(f"附件：{n_ok}/{len(rows)} 个文件入包（manifest：{mpath}）")
+    return manifest
 
 
 def cmd_backup(args) -> None:
@@ -160,13 +230,17 @@ def cmd_backup(args) -> None:
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
+    storage = args.storage or os.path.join(os.path.dirname(os.path.abspath(args.db)), "attachments")
+    att_manifest = copy_attachments(dst, storage, out_dir, stamp)
+
     check = check_db(dst)
     for suffix in ("-wal", "-shm"):
         extra = dst + suffix
         if os.path.exists(extra):
             os.remove(extra)
     print(f"备份完成：\n  db     {dst}\n  sql    {sql_path}"
-          + (f"\n  json   {json_path}" if json_path else ""))
+          + (f"\n  json   {json_path}" if json_path else "")
+          + (f"\n  att    {os.path.join(out_dir, 'attachments')}" if att_manifest else ""))
     print("副本校验：integrity ok，counts =", json.dumps(check["counts"], ensure_ascii=False))
 
 
@@ -204,6 +278,14 @@ def cmd_restore(args) -> None:
             os.remove(extra)
             print(f"清理残留：{extra}")
     shutil.copy2(src, dst)
+    # D4: 附件目录核对（只提示，不自动搬移——恢复决策由运维做）
+    atts = attachment_rows(dst)
+    if atts:
+        storage = args.storage or os.path.join(os.path.dirname(dst), "attachments")
+        have = sum(1 for r in atts if os.path.isfile(os.path.join(storage, r["id"])))
+        print(f"附件核对：库内 {len(atts)} 条元数据，附件目录 {storage} 命中 {have} 个文件。"
+              + ("请随备份包一起恢复 attachments/（manifest 逐文件核对 sha256）。"
+                 if have < len(atts) else ""))
     check = check_db(dst)
     print(f"恢复完成（重启服务器后即可读）：integrity ok, counts = "
           f"{json.dumps(check['counts'], ensure_ascii=False)}\n"
@@ -220,6 +302,8 @@ def main() -> None:
     s.add_argument("--out", default=".", help="输出目录")
     s.add_argument("--json", action="store_true",
                    help="同时向运行中的服务器取 /export JSON（需 RESEARCHMAP_* 环境变量）")
+    s.add_argument("--storage", default=None,
+                   help="附件字节目录（默认取 --db 同目录的 attachments/；D 批 §9.2）")
     s.add_argument("--base", default=None)
     s.set_defaults(fn=cmd_backup)
 
@@ -235,6 +319,8 @@ def main() -> None:
     s.add_argument("--src", required=True, help="备份 .db 路径")
     s.add_argument("--dst", required=True, help="目标 data.db 路径")
     s.add_argument("--server-stopped", action="store_true")
+    s.add_argument("--storage", default=None,
+                   help="附件字节目录（默认取 --dst 同目录的 attachments/）")
     s.add_argument("--yes", action="store_true", help="跳过交互确认")
     s.set_defaults(fn=cmd_restore)
 

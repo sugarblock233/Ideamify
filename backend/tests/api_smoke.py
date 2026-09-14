@@ -256,11 +256,11 @@ check("commit detail has operations + changes + node links",
 # ---------------- export -----------------------------------------------------
 r = c.get(f"/api/v1/projects/{pid}/export")
 e = r.json()
-ok = (e["schema_version"] == 1 and len(e["nodes"]) == 5 and len(e["relations"]) == 1
+ok = (e["schema_version"] == 2 and len(e["nodes"]) == 5 and len(e["relations"]) == 1
       and e["counts"]["commits"] == 7
       and all("details_md" in n for n in e["nodes"])
       and any(n["id"] == child and not n["archived"] for n in e["nodes"]))
-check("export: schema v1, full content, relations, full history", ok, str(list(e.keys())))
+check("export: schema v2, full content, relations, full history", ok, str(list(e.keys())))
 
 # ---------------- context ----------------------------------------------------
 r = c.get(f"/api/v1/projects/{pid}/context", params={"focus_node_id": third, "max_chars": 16000})
@@ -750,6 +750,14 @@ rr = commit(ops, c.get(f"/api/v1/projects/{pid}").json()["revision"], summary="�
 check("commit referencing attachment -> 200", rr.status_code == 200, rr.text[:200])
 st = {i["id"]: i["state"] for i in c.get(f"/api/v1/projects/{pid}/attachments").json()["items"]}
 check("referenced attachment flipped staged->attached in-commit", st.get(att["id"]) == "attached", str(st)[:150])
+
+# D4: 导出含附件元数据（字节不入 JSON 导出）
+e2 = c.get(f"/api/v1/projects/{pid}/export").json()
+row = next((a for a in e2.get("attachments", []) if a["id"] == att["id"]), None)
+check("export schema v2 carries attachment metadata (sha256/state, no bytes)",
+      e2["schema_version"] == 2 and row is not None and row["state"] == "attached"
+      and row["sha256"] == att["sha256"] and "data" not in row
+      and e2["counts"]["attachments"] == len(e2["attachments"]), str(e2.get("counts")))
 
 # 校验闸口
 r = cm.post(f"/api/v1/projects/{pid}/attachments", files={"file": ("x.txt", b"not an image", "text/plain")})

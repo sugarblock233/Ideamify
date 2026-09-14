@@ -434,6 +434,19 @@ def cmd_relations(args):
                     f"/nodes/{args.node_id}/relations?{'&'.join(params)}"))
 
 
+def cmd_attachments(args):
+    """D4: 受管附件元数据列表（只读）。字节不经 CLI——写入与下载一律走
+    UI/API，令牌永不落盘见 DECISIONS §18。"""
+    client = make_client(args)
+    params = []
+    if args.cursor:
+        params.append(f"cursor={urllib.parse.quote(args.cursor, safe='')}")
+    params.append(f"limit={args.limit}")
+    emit(get_or_die(client,
+                    f"/api/v1/projects/{args.project_id}"
+                    f"/attachments?{'&'.join(params)}"))
+
+
 def cmd_search(args):
     client = make_client(args)
     q = urllib.parse.quote(args.query, safe="")
@@ -724,6 +737,13 @@ def main(argv=None):
     s.add_argument("--limit", type=int, default=20)
     s.add_argument("--cursor", default=None)
     s.set_defaults(fn=cmd_relations)
+
+    s = sub.add_parser("attachments", help="项目受管附件元数据列表（分页；只读）")
+    common_args(s)
+    s.add_argument("project_id")
+    s.add_argument("--limit", type=int, default=200)
+    s.add_argument("--cursor", default=None)
+    s.set_defaults(fn=cmd_attachments)
 
     s = sub.add_parser("search", help="搜索（标题/摘要/标签/观察/结论，中文子串）")
     common_args(s)

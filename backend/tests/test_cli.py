@@ -11,6 +11,8 @@ Two kinds of check:
   on stdout/stderr of an actual run.
 """
 
+import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -18,6 +20,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -202,3 +205,45 @@ def test_dry_run_still_persists_missing_identity(server, project, tmp_path):
     written = json.loads(ops.read_text(encoding="utf-8"))
     assert written["request_id"], "dry-run must still write identity back"
     assert written["expected_revision"] is not None
+
+
+# --------------------------- D4: attachments（只读列表） ----------------------
+
+ATT_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def _multipart_upload(base, pid: str) -> dict:
+    # 边界不带前导连字符：python-multipart 对 `--xxx` 形状的头值偶发解析偏移
+    body = (b"--cliattachboundary\r\n"
+            b'Content-Disposition: form-data; name="file"; filename="fig.png"\r\n'
+            b"Content-Type: image/png\r\n\r\n" + ATT_PNG + b"\r\n"
+            b"--cliattachboundary--\r\n")
+    req = urllib.request.Request(
+        f"{base}/api/v1/projects/{pid}/attachments", data=body, method="POST",
+        headers={"Authorization": f"Bearer {TOKEN}",
+                 "Content-Type": "multipart/form-data; boundary=cliattachboundary"})
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise AssertionError(f"upload failed {e.code}: {e.read().decode()[:300]}")
+
+
+def test_attachments_lists_metadata_readonly(server, project):
+    att = _multipart_upload(server, project)
+
+    r = run_cli(server, "attachments", project)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)                    # stdout stays one JSON object
+    rows = [i for i in out["items"] if i["id"] == att["id"]]
+    assert len(rows) == 1
+    assert rows[0]["state"] == "staged"
+    assert rows[0]["sha256"] == hashlib.sha256(ATT_PNG).hexdigest()
+    assert rows[0]["mime"] == "image/png"
+
+    # cursor 分页参数被透传（空结果也须是合法 JSON 对象）
+    r2 = run_cli(server, "attachments", project, "--limit", "1")
+    assert r2.returncode == 0, r2.stderr
+    assert len(json.loads(r2.stdout)["items"]) <= 1
