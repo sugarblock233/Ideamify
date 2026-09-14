@@ -10,7 +10,10 @@ WORKDIR /src
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+# vite.config.ts sets outDir "dist", resolved against the project root, which
+# is this WORKDIR — so the bundle lands at /src/dist (NOT /src/frontend/dist:
+# `COPY frontend/ ./` copies the *contents* of frontend/ into /src).
+RUN npm run build && test -f /src/dist/index.html
 
 FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -26,7 +29,10 @@ WORKDIR /app
 COPY backend/requirements.lock.txt backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.lock.txt
 COPY backend/ .
-COPY --from=frontend-build /src/frontend/dist ./frontend-dist
+COPY --from=frontend-build /src/dist ./frontend-dist
+# Fail the build, not the first request, if the bundle or the package didn't
+# make it in.
+RUN test -f /app/frontend-dist/index.html && test -f /app/app/main.py
 
 VOLUME ["/data"]
 EXPOSE 8000
