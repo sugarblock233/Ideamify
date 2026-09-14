@@ -6,6 +6,27 @@ migration steps will be noted here.
 
 ## [Unreleased]
 
+### Added
+
+- Canvas layout switcher: horizontal tree, vertical tree and outline list,
+  with folds, branch filter and viewport remembered independently per
+  layout (browser-side, per project).
+- One-click expand/collapse tools above the map: expand all / collapse all,
+  expand to level 1–3, expand the selected subtree, and single-step undo
+  for batch tools.
+- Information density tiers: cards step down to compact and overview
+  presentations as you zoom out (or lock a tier in the view menu), with an
+  overview overlay showing route names, a status legend, and a
+  low-interference mode that hides tags and counts.
+- A resizable, collapsible detail side panel; collapsing it never discards
+  an unsaved draft, and the restore entry stays visible on the right edge.
+- An adaptive top bar that keeps search reachable at narrow widths, and
+  side-panel tabs that scroll instead of shrinking.
+- Interface language switch (中文 / English) in the top bar; user content
+  and API fields are never translated.
+- Per-project view preferences persist in the browser: layout choice,
+  density tier lock and low-interference mode.
+
 ### Fixed
 
 - AI updates remain detectable after selecting another node. Refresh now

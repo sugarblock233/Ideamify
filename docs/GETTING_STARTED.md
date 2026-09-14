@@ -52,7 +52,26 @@ The **关联** tab links work across branches. The **历史** tab shows the sele
 node's commits and before/after changes. Search finds earlier work by title,
 summary, tags, finding or decision. A card's right-click menu can copy a node link.
 
-## 4. Hand the record to your AI
+## 4. Views and layouts
+
+Above the map sits a row of view tools (these settings live only in this
+browser; they are never part of the research record):
+
+- **Bulk expand/collapse**: expand all, collapse all, expand to level 1–3,
+  expand the selected subtree; after a batch action, **恢复上次** steps back.
+- **Layout**: switch 横向树 / 纵向树 / 大纲 from the ⋯ menu. Each layout
+  remembers its own folds, branch filter and viewport; a new layout opens
+  with the first two levels expanded.
+- **Density**: cards start at the reading tier and step down automatically
+  as you zoom out — compact (summary and counts hidden), then overview
+  (color blocks with a route-name overlay, a legend and a zoom-to-locate
+  chip). You can also lock a tier. **低干扰** hides tags and counts.
+- **Detail panel**: drag its left edge to resize; when collapsed a restore
+  button stays on the right edge, marked with a dot when a draft is dirty.
+- **Language**: 中文 / English from the top-bar ⋯ menu; content and API
+  fields are never translated.
+
+## 5. Hand the record to your AI
 
 Use **⋯ → AI 接入说明** to get the server address, project ID and command examples.
 Configure the AI's separate token in its terminal environment, then give it
@@ -72,7 +91,7 @@ be able to run the [CLI](../tools/researchmap.py) with Python 3 and reach the
 same server. `localhost` on another computer is that other computer, not
 this instance; arrange a trusted connection before using a remote AI tool.
 
-## 5. Review the update and finish the session
+## 6. Review the update and finish the session
 
 Use the app's **刷新** or **载入更新** button. Review the new node and history;
 the AI token's name should appear as the actor. Concurrent edits to the same

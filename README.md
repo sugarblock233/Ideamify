@@ -20,8 +20,13 @@ read and update the same record, so a new session can pick up where you left off
 - Let external AI tools use the HTTP API or Python CLI, with revision checks
   that prevent one session from silently overwriting another.
 - Run locally with Docker and keep your records in a persistent SQLite volume.
+- Views and layouts (new): horizontal tree / vertical tree / outline list,
+  with folds and viewport remembered per layout; one-click expand/collapse
+  tools; zoom-driven density tiers (reading / compact / overview) and a
+  low-interference mode; a resizable, collapsible detail panel; interface
+  in Chinese or English.
 
-The current interface is in Chinese and displays the name **ResearchMap**.
+The app displays the name **ResearchMap**.
 Ideamify is the repository name; the CLI and `RESEARCHMAP_*` configuration
 use the existing ResearchMap name. The app does not call a model or run
 experiments for you. It is designed for one researcher and their trusted tools.

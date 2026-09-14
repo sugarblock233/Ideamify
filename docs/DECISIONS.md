@@ -144,6 +144,76 @@ SPEC 未规定、实现中被迫选定的事，逐条记在这里（含理由与
 - 落点：`tools/researchmap.py`、`docs/AI_USAGE.md`、
   `docs/AI_USAGE.zh-CN.md`、`docs/ai-session-example.md`、`examples/*`。
 
+## 13. 视图偏好存储：三键分工 + SavedView v2（A1/A6/B2）
+- **一个关注点一个键**，让高频写者永不共享状态：
+  - `rm.lang` 全局语言（`lib/i18n.ts` 独占）；
+  - `rm.prefs.app` 全局 chrome 侧栏偏好 `{width, collapsed}`；
+  - `rm.prefs.<pid>` 每项目视图选择 `{layout, density, lowInterference}`；
+  - `rm.view.<pid>` SavedView——按布局分槽的折叠/分支/视口。
+- `rm.view.<pid>` v1 是无版本 `{folds, branchRoot, viewport}`；v2 包成
+  `{version:2, layouts:{h|v|outline}}`，旧 blob 读回即 `layouts.h`。全部
+  `lib/viewPrefs.ts` 收口（2026-09 起 Canvas 的旧 `loadSavedView/saveView`
+  是其 h 槽兼容别名）。
+- **两个既有承重 read-modify-write 写者**（Canvas onMoveEnd 的视口、
+  Workspace folds effect 的折叠）行为不变，只是按当前布局选槽；
+  侧栏宽度一类高频写入不并入该键。
+- **首开默认（A03 virgin）**：`h` 树沿用视口启发（折叠空 + 视口空 ⇒
+  initialFolds）；布局切换处 v2 能区分「槽不存在」与「显式全展开」
+  （`hasLayoutView`），切换时槽不存在 ⇒ initialFolds，显式条目逐字恢复。
+- **A6 注记**：批量工具的「恢复上次」快照只覆盖批量工具换掉的那一批
+  折叠；卡片上的手动折叠不参与快照（单步语义保持可预期）。
+
+## 14. 信息密度三档：阈值/回差/档位不动坐标（B1/B4）
+- 三档「阅读 / 精简 / 概览」由 zoom 驱动（自动档）或锁定（阅读/精简/
+  概览/自动 分段控，写 `rm.prefs.<pid>.density`）。纯函数
+  `resolveTier(prev, mode, zoom)`（`lib/detailLevel.ts`），单测覆盖。
+- **阈值是初始设计参数，待视觉验证**：阅读下界 0.70、概览上界 0.35
+  （常量 `TIER_ZOOM`）；进入/离开各 ±0.02 死区，回差 `TIER_HYST=0.04`，
+  边界来回不抖（E2E 快速往返断言）。
+- **档位绝不改坐标**：卡片盒常为 280×144，档位只改画什么（CSS 类
+  `.rm-card.tier-*`）；布局与选中定位对档位无感（E2E 断言）。
+- 图形辅助编码：状态色不变，字形 `STATUS_GLYPH` 为语言无关符号
+  （○◐◇✓✕≈），概览档以「色块+字形」辨认卡片；状态图例 chip 常驻
+  非阅读档。
+- 概览层的路线名/选中浮层（`OverviewLabels`）为屏幕空间元素，尺寸
+  不随 zoom 缩放；去重叠按 (depth, order, id) 确定性推挤，同输入必出
+  同布局。
+- **枚举仍英文**：API 的 status/kind 等永远不改值；界面文案经
+  `statusLabel` 等映射（§16）。
+- 低干扰模式 = 视图选择（`rm.prefs.<pid>.lowInterference`）：隐藏卡片
+  标签/计数与关系线悬停标签，图例可展开对照。
+
+## 15. 布局策略：h/v 共用 d3 几何，大纲不走 layout（B2/B3）
+- `lib/layout.ts` 策略化，**保所有旧导出签名**；
+  `computeLayout(..., mode="h")` 使横树坐标逐字节不变。每模式常量：
+  - `h`（SPEC 2.4 原样）：`nodeSize [176, 380]`，d3 轴互换
+    （canvasX=d3.y−W/2，canvasY=d3.x−H/2）；
+  - `v`（纵树）：`NODE_SIZE_V=[344, 208]`——sibling 轴 344=卡 280+64
+    沟槽（对卡宽比即横树 176:280 的空气比），depth 轴 208=卡高
+    144+64 连线带；d3 轴直出；卡仍 280×144。
+- 确定性与不重叠**按模式成立**：同 (树, order, folds, mode) 出同坐标；
+  `layout.test`/`layout.stress` 以 `describe.each` 双模式回归，h 的旧
+  坐标断言原样保留、v 是新增期望。
+- **大纲不走 layout.ts**：`OutlineView` 直接复用
+  `buildTreeData`（折叠/分支语义与画布字面共享），文字行没有坐标；
+  选中态跨模式天然保持（同一 selectNode）。
+- 边锚点随模式翻转（h left/right，v top/bottom），大纲无关。
+- **关系仍不进布局**：只有主树决定坐标（SPEC 2.4 不变）；关系线是
+  选中节点的叠层。
+
+## 16. i18n 政策（A2–A4）
+- **zh 源字典**：`dict.zh.ts` 是唯一真相（`as const`），值 = 现硬编码
+  中文串逐字节；`dict.en.ts` 类型 `Record<keyof typeof zh, string>`，
+  缺英文键 = tsc 编译错。
+- 无 context、无 react-i18next：普通 `t(key, params)` + 模块态 +
+  `useSyncExternalStore`（`useT()`），语言切换即时重渲染、不刷新页面；
+  选择持久化在 `rm.lang`，首启同步探测（避免闪屏）。
+- **只翻界面 chrome**：标题/正文/标签/证据等用户内容永不翻译；
+  API 枚举与错误码原样透传（错误正文带服务端数据时改用带参模板，
+  未知错误原文透传）。
+- **E2E 钉 zh-CN**（`playwright.config.ts use.locale`）：旧 spec 的
+  中文可访问名选择器不受语言切换影响；新控件同时带 `data-testid`。
+
 ## 尚未完成 / 未验证
 - **仅一项未验证**：`Dockerfile` + `compose.yaml` + `.env.example`
   已写好，但本开发环境没有 docker，`docker compose build` 未执行。
