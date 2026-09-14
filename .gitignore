@@ -1,15 +1,45 @@
+# --- Deps / build artifacts ---
 node_modules/
 frontend/dist/
 .venv/
 venv/
+*.egg-info/
+
+# --- Python ---
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# --- Local runtime data (local dev DBs live under data/ via RESEARCHMAP_DB) ---
 data/
 !data/.gitkeep
 config/
+
+# --- SQLite files: loose databases and WAL/SHM sidecars ---
+# Covers scratch databases and any accidentally created local copies.
+# Acceptance assets under docs/acceptance-2026-09-13/ are .png/.json/.txt and
+# are NOT matched by these patterns.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Backup / restore artifacts (tools/backup.py) ---
+backup/
+backups/
+*.bak
+.pre-restore-*
+
+# --- Test / e2e artifacts ---
 test-results/
 playwright-report/
+
+# --- Credentials: local .env files stay out of Git; keep the example tracked ---
 .env
+.env.*
+!.env.example
+
+# --- Misc ---
 *.log
 .DS_Store

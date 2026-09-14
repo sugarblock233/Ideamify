@@ -11,7 +11,9 @@ services:
     build: .
     image: researchmap:0.1
     ports:
-      - "${RESEARCHMAP_PORT:-8000}:8000"
+      # 默认只绑定宿主机回环（SPEC 9）；需要远程访问时由部署者通过
+      # 自己的受保护网络 / HTTPS 代理实现，不要直接改成 0.0.0.0。
+      - "127.0.0.1:${RESEARCHMAP_PORT:-8000}:8000"
     environment:
       RESEARCHMAP_DB: /data/researchmap.db
       # 内联 JSON：{token_name: bearer_token}，每个令牌 ≥12 个字符；

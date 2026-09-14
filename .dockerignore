@@ -1,0 +1,59 @@
+# Docker build context — keep only what the Dockerfile COPYs (frontend/ and
+# backend/). Everything below is local data, docs, or caches that must never
+# enter the image.
+
+.git
+.github
+.gitignore
+.gitkeep
+
+# Credentials & local config
+.env
+.env.*
+config/
+
+# Node
+node_modules
+**/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+
+# Python
+backend/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+
+# Databases and WAL/SHM sidecars
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/
+
+# Backup / restore artifacts
+backup/
+backups/
+*.bak
+.pre-restore-*
+
+# Local-only material (contains acceptance screenshots with host paths)
+docs/
+
+# Not needed to build the image
+examples/
+scripts/
+tools/
+README.md
+README.zh-CN.md
+CONTRIBUTING.md
+SECURITY.md
+CODE_OF_CONDUCT.md
+CHANGELOG.md
+AGENTS.md
+.editorconfig
+compose.yaml
+.DS_Store
+*.log

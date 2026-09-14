@@ -18,8 +18,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     RESEARCHMAP_STATIC=/app/frontend-dist \
     RESEARCHMAP_DB=/data/researchmap.db
 WORKDIR /app
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.txt = human-maintained direct deps (the base).
+# requirements.lock.txt = full transitive lock from `pip freeze` in a clean
+# venv; Docker and CI install from the lock. Regenerate after changing
+# requirements.txt:  (python3 -m venv /tmp/x && /tmp/x/bin/pip install \
+#   -r requirements.txt && /tmp/x/bin/pip freeze > requirements.lock.txt)
+COPY backend/requirements.lock.txt backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.lock.txt
 COPY backend/ .
 COPY --from=frontend-build /src/frontend/dist ./frontend-dist
 
