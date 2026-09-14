@@ -47,7 +47,13 @@ def open_ro(path: str) -> sqlite3.Connection:
 
 
 def check_db(path: str) -> dict:
-    """完整性检查 + 计数摘要。read-only 打开，绝不写目标文件。"""
+    """完整性检查 + 计数摘要。read-only 打开，绝不写目标文件。
+
+    缺表是**错误**，不是"空库"。容器部署上有一个真实的踩坑路径：库是 WAL
+    模式，用 `docker cp` 只拷主文件会得到一个 4 KB、没有任何表的文件——真正的
+    数据还在 researchmap.db-wal 里。旧版本对这种文件照打 "verify 通过"，
+    等于给一份空库背书，比直接失败更危险。所以这里直接退出。
+    """
     if not os.path.exists(path):
         raise SystemExit(f"文件不存在：{path}")
     con = open_ro(path)
@@ -56,11 +62,23 @@ def check_db(path: str) -> dict:
         if rc != "ok":
             raise SystemExit(f"integrity_check 失败：{rc[:400]}")
         counts = {}
+        missing = []
         for t in SCHEMA_TABLES:
             try:
                 counts[t] = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
             except sqlite3.OperationalError:
                 counts[t] = "缺表"
+                missing.append(t)
+        if missing:
+            raise SystemExit(
+                f"缺表：{path} 里没有 {', '.join(missing)}——这不是一个"
+                "ResearchMap 数据库。\n"
+                "若这是从容器里拷出来的文件，多半只拷到了主文件，而数据还在同目录的"
+                " -wal 侧写文件里（WAL 模式；`docker cp` 不带上它，主文件可能只有"
+                " 4 KB、一个表都没有）。\n"
+                "正确做法：见 tools/backup.py 的备份流程——用本工具（sqlite3 Online"
+                " Backup API，对 WAL 安全）或在容器内先做 checkpoint 再拷贝。"
+            )
         return {"file": path, "integrity": "ok", "counts": counts}
     finally:
         con.close()
