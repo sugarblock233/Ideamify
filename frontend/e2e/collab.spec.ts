@@ -158,6 +158,30 @@ test("A02 离开确认：退出与新建项目都必须先确认，取消后草�
   await expect(page.getByPlaceholder("访问令牌（Bearer token）")).toBeVisible({ timeout: 10_000 });
 });
 
+/** B06/R08：AI 接入弹窗给的必须是可直接粘贴执行的命令，且 409 说明要覆盖
+ *  服务端真实返回的四种 code，而不是笼统地说成"同一对象冲突"。 */
+test("B06 AI 接入说明：命令可直接执行，409 四种情况说清楚", async ({ page }) => {
+  const s = await seedDeepTree(page);
+  await enterStudio(page, s.pid);
+  await page.locator("button.dotmenu").click();
+  await page.locator(".pop-item", { hasText: "AI 接入说明" }).click();
+  const block = page.locator(".aiaccess-pre");
+  await expect(block).toBeVisible();
+  const text = (await block.innerText()).trim();
+
+  // 没有 [--foo <占位>] 这类照抄就报错的伪语法
+  expect(text).not.toMatch(/\[--\w[\w-]*\s/);
+  // 命令里带的是真实项目 ID
+  expect(text).toContain(`researchmap.py context ${s.pid}`);
+  expect(text).toContain("--dry-run");
+  // 409 的四种 code 都点名，并说明 REVISION_CONFLICT 锁的是项目版本
+  for (const code of ["REVISION_CONFLICT", "IDEMPOTENCY_KEY_REUSED",
+                      "DUPLICATE_RELATION", "PAGINATION_STALE"]) {
+    expect(text, `409 说明缺少 ${code}`).toContain(code);
+  }
+  expect(text).toContain("整个项目的版本");
+});
+
 test("A02 同字段并发提交：409 冲突 → 保留草稿 → 重排合并 → 保存", async ({ page }) => {
   // ---- 种子：单节点 ----
   const nid = crypto.randomUUID();

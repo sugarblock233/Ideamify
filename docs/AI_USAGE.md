@@ -145,7 +145,7 @@ real commit, and every network retry.
 ### 3.1 The request file is the replayable artifact
 
 ```bash
-$RM commit <PID> ops.json --dry-run   # validate + plan; persists nothing
+$RM commit <PID> ops.json --dry-run   # validate + plan; the SERVER persists nothing
 $RM commit <PID> ops.json             # real commit (positional file or --file)
 ```
 
@@ -163,8 +163,13 @@ idempotent replay. `--auto-rev` is kept for compatibility and means exactly
 them — not even with `--auto-rev`.** A stale `expected_revision` therefore
 409s, and you must re-read the map and **explicitly rewrite the file**
 (new `expected_revision`, merged operations); the CLI will not silently bump
-the revision for you. `--dry-run` only alters the HTTP request
-(`dry_run=true`); it is never written into the file.
+the revision for you.
+
+**`--dry-run` only stops the SERVER from writing** (the request carries
+`dry_run=true`); it does not change local identity preparation. A dry run of a
+file missing `request_id` / `expected_revision` still writes those values back
+— that is exactly what makes the dry run and the real commit send a
+byte-identical body. Fields already present are never touched, in any mode.
 
 ### 3.2 Retry semantics — three cases, do not conflate them
 

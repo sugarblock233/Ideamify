@@ -92,7 +92,7 @@ docker compose up -d --build
 
   ```bash
   python3 tools/backup.py backup  --db <db文件> --out ./backup/ --json
-  python3 tools/backup.py verify  --db ./backup/researchmap-<ts>.db
+  python3 tools/backup.py verify  ./backup/researchmap-<ts>.db
   python3 tools/backup.py restore --src <备份> --dst <目标> --server-stopped --yes
   ```
 

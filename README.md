@@ -105,7 +105,7 @@ in, with the content intact.
 
   ```bash
   python3 tools/backup.py backup  --db <db-file> --out ./backup/ --json
-  python3 tools/backup.py verify  --db ./backup/researchmap-<ts>.db
+  python3 tools/backup.py verify  ./backup/researchmap-<ts>.db
   python3 tools/backup.py restore --src <backup> --dst <target> --server-stopped --yes
   ```
 

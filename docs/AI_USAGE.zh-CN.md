@@ -152,8 +152,12 @@ CLI 会生成取值（`expected_revision` 读取当前项目 revision 得到）�
 语义就是"缺失才准备"；**一旦两个字段齐备，CLI 绝不改动它们——包括
 带 `--auto-rev`。**因此过期的 `expected_revision` 会得到 409，你需要重读
 地图并**显式重写文件**（新 `expected_revision`、合并后的 operations）；
-CLI 不会替你静默刷新版本。`--dry-run` 只改 HTTP 请求（`dry_run=true`），
-从不写入文件。
+CLI 不会替你静默刷新版本。
+
+**`--dry-run` 只让服务端不落库**（请求带 `dry_run=true`），它**不影响本地的
+身份准备**：文件若缺 `request_id` / `expected_revision`，演练同样会把生成值
+回写进文件——这正是"演练与正式提交发出逐字节相同的请求体"的前提。已齐备的
+两个字段在任何模式下都不会被改动。
 
 ### 3.2 重试语义 — 三种情况，不要混为一谈
 
