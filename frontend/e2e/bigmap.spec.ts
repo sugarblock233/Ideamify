@@ -197,3 +197,69 @@ test("A03/R03 大图首屏：1280×800 同样落在可读缩放上", async ({ pa
   mkdirSync(EVIDENCE_DIR, { recursive: true });
   await page.screenshot({ path: path.join(EVIDENCE_DIR, "a03-firstopen-1280x800.png") });
 });
+
+test("A03/R03 分支视图：折叠→只看这一分支→展开，仍落在可读缩放上", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { pid } = await seedBigTree(page);
+  await enterStudio(page, pid);
+
+  const route = () => page.locator(".rm-card", { hasText: "压测路线1" }).first();
+  const cardCount = () => page.locator(".rm-card").count();
+  const total = ROUTES + ROUTES * CHILDREN_PER_ROUTE;
+  expect(await cardCount()).toBe(total);
+
+  const ctxItem = (label: string) => page.locator(".ctx > div", { hasText: label });
+
+  // 首屏相机锚在根卡片上，远处的路线未必在视口内；先用搜索把目标路线定位到屏幕中央，
+  // 这样右键菜单一定作用在可见卡片上。
+  const searchBox = page.getByPlaceholder("搜索标题/摘要/标签/观察/结论（中文子串可用）");
+  await searchBox.fill("压测路线1");
+  await page.locator(".pop-item", { hasText: "压测路线1" }).first().click();
+  await expect(page.locator("h2", { hasText: "压测路线1" }).first()).toBeVisible();
+  await expect(route()).toBeInViewport();
+
+  // 折叠该路线 → 只剩它自己
+  await route().click({ button: "right" });
+  await ctxItem("折叠此分支").click();
+  await expect.poll(cardCount).toBe(total - CHILDREN_PER_ROUTE);
+
+  // 只看这一分支 → 分支视图只剩这一条路线的可见部分
+  await route().click({ button: "right" });
+  await ctxItem("只看这一分支").click();
+  await expect(page.locator(".breadcrumbs")).toContainText("分支视图");
+  await expect.poll(cardCount).toBe(1);
+
+  // 分支视图里展开 → 1 条路线 + 它的全部二级子节点
+  await route().click({ button: "right" });
+  await ctxItem("展开此分支").click();
+  await expect.poll(cardCount).toBe(1 + CHILDREN_PER_ROUTE);
+
+  // 展开后的卡片仍要在可读尺寸上（分支视图与首屏共用同一套缩放心智）
+  const paneBox = (await page.locator(".canvas-wrap").boundingBox())!;
+  let widest = 0;
+  for (let j = 0; j < CHILDREN_PER_ROUTE; j++) {
+    const b = await page
+      .locator(".rm-card", { hasText: `压测1-${j + 1} 二级子路线` })
+      .first()
+      .boundingBox();
+    if (
+      b &&
+      b.x >= paneBox.x &&
+      b.x + b.width <= paneBox.x + paneBox.width + 1 &&
+      b.y >= paneBox.y &&
+      b.y + b.height <= paneBox.y + paneBox.height + 1
+    ) {
+      widest = Math.max(widest, b.width);
+    }
+  }
+  expect(widest, "分支视图里的卡片也要达到可读宽度").toBeGreaterThanOrEqual(MIN_READABLE_CARD_PX);
+
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  await page.screenshot({ path: path.join(EVIDENCE_DIR, "a03-branch-expanded-1440x900.png") });
+
+  // 面包屑回项目全景：恢复整棵树。注意"展开此分支"清掉的是共享的折叠状态，
+  // 所以回到全景后这条路线（以及其他从未折叠的路线）的子节点都是可见的。
+  await page.locator(".breadcrumbs a", { hasText: "项目全景" }).click();
+  await expect(page.locator(".breadcrumbs")).toHaveCount(0); // 分支视图已退出
+  await expect.poll(cardCount).toBe(total);
+});

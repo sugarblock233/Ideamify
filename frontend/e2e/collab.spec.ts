@@ -271,3 +271,67 @@ test("A02 同字段并发提交：409 冲突 → 保留草稿 → 重排合并 �
   const revFinal = (await api(page, "GET", `/api/v1/projects/${pid}`)).json.revision;
   expect(revFinal).toBe(revAfterSeed + 2); // 远端 1 次 + 本地重排后 1 次
 });
+/** B04：归档→恢复的完整浏览器往返。归档只能作用于叶子节点，而且归档后节点会
+ *  从画布与搜索里消失——所以「能不能在浏览器里把它找回来」是这条链路的关键，
+ *  也是本轮补验发现的缺口（恢复动作曾经只连了 props，没有入口）。 */
+test("B04 归档→恢复：画布上找回已归档节点并原位恢复", async ({ page }) => {
+  const s = await seedDeepTree(page);
+  await enterStudio(page, s.pid);
+  await expect(page.locator(".rm-card").first()).toBeVisible({ timeout: 20_000 });
+
+  // 展开 B 让叶子 C 出现在画布上
+  await page.locator(".rm-card", { hasText: "三层B" }).first().locator(".fold-btn").click();
+  const cardC = page.locator(".rm-card", { hasText: "三层C" });
+  await expect(cardC).toHaveCount(1, { timeout: 10_000 });
+  await expect(page.locator(".rm-card")).toHaveCount(3);
+
+  // ---- 归档 C（叶子）----
+  await cardC.first().click();
+  await expect(page.locator("h2", { hasText: "三层C" }).first()).toBeVisible();
+  await page.getByRole("button", { name: "归档此节点（仅叶子）" }).click();
+  await page.getByPlaceholder("归档原因（必填）").fill("B04：归档往返用例（合成）");
+  await page.getByRole("button", { name: "确认归档" }).click();
+  await expect(cardC).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.locator(".rm-card")).toHaveCount(2);
+  expect((await api(page, "GET", `/api/v1/projects/${s.pid}/nodes/${s.c}`)).json.archived).toBe(true);
+
+  // ---- 归档后仍选中的详情里直接给出恢复入口 ----
+  await expect(page.locator(".hint", { hasText: "本节点已归档" })).toBeVisible();
+
+  // ---- 切到别的节点，再靠「⋯ → 显示已归档节点」把它找回来 ----
+  await page.locator(".rm-card", { hasText: "三层A" }).first().click();
+  await page.locator("button.dotmenu").click();
+  await page.locator(".pop-item", { hasText: "显示已归档节点" }).click();
+  await expect(page.locator("button.dotmenu")).toHaveClass(/open/);
+  const archivedCard = page.locator(".rm-card.archived", { hasText: "三层C" });
+  await expect(archivedCard).toHaveCount(1, { timeout: 15_000 });
+  await expect(archivedCard.locator(".arch-pill")).toHaveText("已归档");
+  // 隐藏后又会消失（开关的两个方向都真的改到画布）。菜单是常开的开关项，
+// 点完不会自动收起，所以这里不再点 ⋯。
+  await page.locator(".pop-item", { hasText: "隐藏已归档节点" }).click();
+  await expect(archivedCard).toHaveCount(0, { timeout: 15_000 });
+
+  // ---- 恢复：重新显示 → 选中 → 填写原因 → 确认 ----
+  await page.locator(".pop-item", { hasText: "显示已归档节点" }).click();
+  await expect(archivedCard).toHaveCount(1, { timeout: 15_000 });
+  await archivedCard.first().click();
+  await page.getByRole("button", { name: "恢复此节点" }).click();
+  await page.getByPlaceholder("恢复原因（必填）").fill("B04：恢复往返用例（合成）");
+  await page.getByRole("button", { name: "确认恢复" }).click();
+
+  // ---- 服务器与画布同时回到未归档状态 ----
+  await expect
+    .poll(async () => (await api(page, "GET", `/api/v1/projects/${s.pid}/nodes/${s.c}`)).json.archived)
+    .toBe(false);
+  await expect(page.locator(".rm-card.archived")).toHaveCount(0, { timeout: 15_000 });
+  const restored = page.locator(".rm-card", { hasText: "三层C" });
+  await expect(restored).toHaveCount(1);
+  await expect(restored.locator(".arch-pill")).toHaveCount(0);
+  await expect(page.locator(".rm-card")).toHaveCount(3);
+
+  // 提交历史上留下归档与恢复两条记录
+  const hist = (await api(page, "GET", `/api/v1/projects/${s.pid}/commits?limit=5`)).json;
+  const types = hist.items.map((c: { summary: string }) => c.summary).join("|");
+  expect(types).toContain("归档节点");
+  expect(types).toContain("恢复节点");
+});
