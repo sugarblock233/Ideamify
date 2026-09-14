@@ -26,6 +26,17 @@ migration steps will be noted here.
   and API fields are never translated.
 - Per-project view preferences persist in the browser: layout choice,
   density tier lock and low-interference mode.
+- Direct creation on the map: 「+ 一级路线」 / 「+ 子节点」 open a dashed
+  draft card next to the parent, edited by the same session as the side
+  panel form. Nothing is committed until you save; cancelling removes the
+  card with no record, and a failed save (offline or revision conflict)
+  keeps the draft for a retry that cannot create a duplicate.
+
+### Changed
+
+- The node-create modal is retired in favour of the on-map draft card;
+  the side panel keeps the same form, accessible names and A06 evidence
+  gate for red/green statuses.
 
 ### Fixed
 

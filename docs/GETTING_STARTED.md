@@ -41,7 +41,26 @@ verify that the underlying experiment happened or that a URL remains accessible.
 Choose **保存**. Use **收起编辑** to return to reading; it does not save edits.
 File evidence is a reference, not an upload: keep the referenced file yourself.
 
-## 3. Continue without erasing what you learned
+## 3. Write straight onto the map: the draft card
+
+Choose **+ 一级路线** or a card's **+ 子节点** (also in the right-click menu)
+and no dialog opens: a dashed **draft card** appears beside its parent right
+on the map, while the side panel simultaneously shows the same form — the
+two editors share one draft, so you can type in either. Nothing is committed
+until you save.
+
+Pressing Enter inside the draft card's title only confirms the input (Enter
+during Chinese IME composition never submits); ⌘/Ctrl+Enter or the **创建**
+button saves, and **取消** makes the card vanish with no record left behind.
+Once saved, the draft card gives way to the real card, located for you.
+
+Switching between 横向树 / 纵向树 / 大纲 keeps the draft: in outline mode it
+degrades to a read-only dashed row while editing stays in the side panel. A
+failed save (offline or a revision conflict) keeps the draft as it was, with
+the error shown in the panel — retry straight away. No matter how many times
+one draft is retried, it produces exactly one commit and one new card.
+
+## 4. Continue without erasing what you learned
 
 Keep the original negative result. Create a child node for the revised idea:
 “Expand keywords only for low-recall questions.” Different attempts can have
@@ -52,7 +71,7 @@ The **关联** tab links work across branches. The **历史** tab shows the sele
 node's commits and before/after changes. Search finds earlier work by title,
 summary, tags, finding or decision. A card's right-click menu can copy a node link.
 
-## 4. Views and layouts
+## 5. Views and layouts
 
 Above the map sits a row of view tools (these settings live only in this
 browser; they are never part of the research record):
@@ -71,7 +90,7 @@ browser; they are never part of the research record):
 - **Language**: 中文 / English from the top-bar ⋯ menu; content and API
   fields are never translated.
 
-## 5. Hand the record to your AI
+## 6. Hand the record to your AI
 
 Use **⋯ → AI 接入说明** to get the server address, project ID and command examples.
 Configure the AI's separate token in its terminal environment, then give it
@@ -91,7 +110,7 @@ be able to run the [CLI](../tools/researchmap.py) with Python 3 and reach the
 same server. `localhost` on another computer is that other computer, not
 this instance; arrange a trusted connection before using a remote AI tool.
 
-## 6. Review the update and finish the session
+## 7. Review the update and finish the session
 
 Use the app's **刷新** or **载入更新** button. Review the new node and history;
 the AI token's name should appear as the actor. Concurrent edits to the same
