@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,6 +24,9 @@ from .views import router as api_router
 
 settings = get_settings()
 init_db()
+
+# D 批 §9.2: the ONLY path exempt from the global 2 MiB body guard.
+ATTACHMENT_UPLOAD_PATH = re.compile(r"^/api/v1/projects/[^/]+/attachments$")
 
 
 def create_app() -> FastAPI:
@@ -47,13 +51,17 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def body_size_guard(request: Request, call_next):
         if request.method in ("POST", "PUT", "PATCH"):
-            cl = request.headers.get("content-length")
-            if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
-                return JSONResponse(
-                    status_code=413,
-                    content={"error": {"code": "REQUEST_TOO_LARGE",
-                                       "message": "请求体超过 2 MiB 上限", "details": {}}},
-                )
+            # D 批 §9.2: multipart 附件上传豁免 2 MiB 全局闸——**仅此一条路径**
+            # 放宽（正文本来就该比 JSON 大）；单文件 ≤10MB 与像素上限由路由内
+            # 显式校验，避免把放宽扩大到全站。
+            if not ATTACHMENT_UPLOAD_PATH.match(request.url.path):
+                cl = request.headers.get("content-length")
+                if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"error": {"code": "REQUEST_TOO_LARGE",
+                                           "message": "请求体超过 2 MiB 上限", "details": {}}},
+                    )
         return await call_next(request)
 
     register_error_handlers(app)

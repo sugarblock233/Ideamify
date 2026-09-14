@@ -15,7 +15,7 @@ move-history before/after.parent_id exposure, search & project pagination.
 The suite is append-friendly: new checks just add `check(...)` calls; the
 wrapper (test_api.py) reads the final "P/N passed" line.
 """
-import json, re, threading, sys, uuid
+import io, json, re, threading, sys, uuid
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -702,6 +702,78 @@ check("oversized body -> 413 REQUEST_TOO_LARGE", r.status_code == 413 and r.json
 # body limit on project create too
 r = c.post("/api/v1/projects", json={"request_id": U(), "name": "标题", "objective": ""})
 check("empty objective -> 422 VALIDATION", r.status_code == 422, r.text[:150])
+
+# ---------------- D 批 §9.2: managed attachments -----------------------------
+import io as _io
+from PIL import Image as _Img
+
+# client() 强制 application/json（供 json= 走捷径）；multipart 必须让
+# requests 自己落 boundary，故开一个不带强制头的专用 client。
+cm = TestClient(app, headers={"Authorization": "Bearer researcher-token-0001"})
+
+def _png(w=3, h=2, color=(200, 60, 60)) -> bytes:
+    buf = io.BytesIO()
+    _Img.new("RGB", (w, h), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+png = _png()
+r = cm.post(f"/api/v1/projects/{pid}/attachments",
+           files={"file": ("fig1.png", png, "image/png")})
+att = r.json()
+check("upload png -> 200 staged(id,width,height,mime)",
+      r.status_code == 200 and att["state"] == "staged" and att["mime"] == "image/png"
+      and att["width"] == 3 and att["height"] == 2 and att["bytes"] == len(png), r.text[:200])
+check("upload created_by = token name", att["created_by"] == "researcher", str(att)[:120])
+
+r2 = cm.post(f"/api/v1/projects/{pid}/attachments",
+            files={"file": ("fig1-rename.png", png, "image/png")})
+check("same sha256 re-upload returns SAME id (幂等)",
+      r2.status_code == 200 and r2.json()["id"] == att["id"] and r2.json()["state"] == "staged", r2.text[:200])
+
+r = c.get(f"/api/v1/attachments/{att['id']}")
+check("GET bytes -> 200 image/png + ETag(sha256)",
+      r.status_code == 200 and r.headers["content-type"].startswith("image/png")
+      and r.headers.get("etag") == '"' + att["sha256"] + '"' and r.content == png, str(r.headers.get("etag")))
+r = TestClient(app).get(f"/api/v1/attachments/{att['id']}")
+check("GET bytes without token -> 401", r.status_code == 401, r.text[:100])
+
+r = c.get(f"/api/v1/projects/{pid}/attachments")
+items = r.json()["items"]
+check("metadata list contains staged row", r.status_code == 200 and any(i["id"] == att["id"] for i in items), r.text[:150])
+
+# 引用翻转：提交一次 node.create，details_md + evidence 引用该附件 → attached
+nid = U()
+ops = [{"op": "node.create", "id": nid, "kind": "attempt", "title": "附件实验节点",
+        "summary": "含受管图", "details_md": f"对比见下图：\n\n![对照](attachment:{att['id']})",
+        "evidence": [{"kind": "inline", "label": "图1", "value": f"attachment:{att['id']}", "note": ""}]}]
+rr = commit(ops, c.get(f"/api/v1/projects/{pid}").json()["revision"], summary="附件引用提交")
+check("commit referencing attachment -> 200", rr.status_code == 200, rr.text[:200])
+st = {i["id"]: i["state"] for i in c.get(f"/api/v1/projects/{pid}/attachments").json()["items"]}
+check("referenced attachment flipped staged->attached in-commit", st.get(att["id"]) == "attached", str(st)[:150])
+
+# 校验闸口
+r = cm.post(f"/api/v1/projects/{pid}/attachments", files={"file": ("x.txt", b"not an image", "text/plain")})
+check("non-image mime -> 422", r.status_code == 422, r.text[:120])
+r = cm.post(f"/api/v1/projects/{pid}/attachments", files={"file": ("fake.png", b"\x89PNGxxxx-not-really", "image/png")})
+check("undecodable png payload -> 422", r.status_code == 422, r.text[:120])
+r = cm.post(f"/api/v1/projects/{pid}/attachments", files={"file": ("big.png", _png(4001, 3), "image/png")})
+check("pixel limit 4000? (上限 8000) 合尺寸 4001x3 -> 200", r.status_code == 200, r.text[:120])
+r = cm.post(f"/api/v1/projects/{pid}/attachments", files={"file": ("huge.png", _png(8001, 2), "image/png")})
+check("pixel >8000 -> 422", r.status_code == 422, r.text[:120])
+r = cm.post(f"/api/v1/projects/{pid}/attachments", files={"file": ("empty.bin", b"", "image/png")})
+check("empty payload -> 422", r.status_code == 422, r.text[:120])
+# >10MB：2MiB 中间件豁免后由路由内 413 拦截
+big = _png(3000, 3000, (10, 10, 10))
+check("png above is <=10MB setup ok", len(big) < 10 * 1024 * 1024, str(len(big)))
+import struct as _struct, zlib as _zlib
+def _blob_png(size):
+    # 合出一张 >10MB 的“合法 png 头 + 超限载荷”——只需触发字节数 413
+    head = b"\x89PNG\r\n\x1a\n"
+    return head + b"0" * (10 * 1024 * 1024 + 1 - len(head))
+r = cm.post(f"/api/v1/projects/{pid}/attachments",
+           files={"file": ("fat.png", _blob_png(0), "image/png")})
+check(">10MB attachment -> 413 REQUEST_TOO_LARGE (路由内校验)",
+      r.status_code == 413 and r.json()["error"]["code"] == "REQUEST_TOO_LARGE", r.text[:150])
 
 c.close(); try_ai.close()
 fails = [n for n, okp in results if not okp]

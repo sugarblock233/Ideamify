@@ -50,9 +50,19 @@ def load_token_config() -> Dict[str, str]:
     return data
 
 
+def _default_storage_dir() -> str:
+    # D 批 §9.2: 附件字节目录。默认放在数据目录旁（与库同卷）；Docker 部署指
+    # 到同一个 /data 卷，备份时一并拷走。
+    env = os.environ.get("RESEARCHMAP_STORAGE", "").strip()
+    if env:
+        return env
+    return str(Path(_default_db_path()).resolve().parent / "attachments")
+
+
 @dataclass(frozen=True)
 class Settings:
     db_path: str = field(default_factory=_default_db_path)
+    storage_dir: str = field(default_factory=_default_storage_dir)
     static_dir: str = field(
         default_factory=lambda: os.environ.get("RESEARCHMAP_STATIC", "").strip()
     )
@@ -75,6 +85,7 @@ class Settings:
 def get_settings() -> Settings:
     tokens = load_token_config()
     return Settings(
+        storage_dir=_default_storage_dir(),
         token_hashes={hashlib.sha256(t.encode("utf-8")).hexdigest(): name for name, t in tokens.items()}
     )
 

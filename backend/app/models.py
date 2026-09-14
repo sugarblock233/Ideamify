@@ -98,3 +98,27 @@ class CommitNode(Base):
 
     commit_id: Mapped[str] = mapped_column(Text, primary_key=True)
     node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class Attachment(Base):
+    """Managed image attachment metadata (D 批 §9.2).
+
+    Bytes live in the storage directory under the attachment id; this row is
+    the only index. state: staged (uploaded, not yet referenced) → attached
+    (referenced by at least one committed node body). Attached rows are never
+    deleted — content is immutable, replacing means a new id.
+    """
+
+    __tablename__ = "attachments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text, index=True)
+    mime: Mapped[str] = mapped_column(Text)
+    bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(Text, index=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    original_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state: Mapped[str] = mapped_column(String(16))
+    created_by: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)

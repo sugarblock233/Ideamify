@@ -12,16 +12,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 
 import sqlalchemy.exc
 import sqlite3
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from .db import Session, now_utc, read_session, write_txn
 from .errors import AppError, conflict, db_busy, err, invalid, not_found
-from .models import Commit, CommitNode, Node, Project, Relation
+from .models import Attachment, Commit, CommitNode, Node, Project, Relation
 from .schemas import (
     CONFIRMED_STATUSES,
     CommitRequest,
@@ -794,6 +795,9 @@ def submit_commit(actor: str, project_id: str, raw: dict, dry_run: bool) -> dict
         plan = Plan(s, project, actor)
         # 3) apply all-or-nothing
         _apply_operations(plan, req)
+        # D 批 §9.2: 本提交正文里引用到的 staged 附件 → attached（同事务）。
+        # 幂等：已 attached 的行本语句为 no-op。
+        _flip_referenced_attachments(s, project_id, req)
 
         # 4) commit record + revision bump
         new_rev = base_rev + 1
@@ -811,6 +815,38 @@ def submit_commit(actor: str, project_id: str, raw: dict, dry_run: bool) -> dict
         s.add_all(CommitNode(commit_id=commit_id, node_id=n) for n in sorted(plan.node_ids))
         s.flush()
     return response
+
+
+# ---------------------------------------------------------------------------
+# D 批 §9.2: staged → attached 翻转（同提交事务内，四项保护不受影响）
+# ---------------------------------------------------------------------------
+
+_ATTACHMENT_REF = re.compile(r"attachment:([0-9a-fA-F-]{36})")
+
+
+def _flip_referenced_attachments(s: Session, project_id: str, req) -> None:
+    """扫描本次 node.create / node.update 的 details_md 与 evidence.value 中的
+    `attachment:<uuid>` 引用，把属于本项目、仍处 staged 的附件翻成 attached。
+    幂等；引用了不存在/他项目的附件不报错（渲染端自然 404，回执已注明）。"""
+    ids: set[str] = set()
+    for op in req.operations:
+        if getattr(op, "op", None) not in ("node.create", "node.update"):
+            continue
+        texts = [getattr(op, "details_md", "") or ""]
+        for ev in getattr(op, "evidence", None) or []:
+            texts.append(getattr(ev, "value", "") or "")
+            texts.append(getattr(ev, "note", "") or "")
+        for t in texts:
+            ids.update(_ATTACHMENT_REF.findall(t))
+    if not ids:
+        return
+    s.execute(
+        update(Attachment)
+        .where(Attachment.id.in_(ids),
+               Attachment.project_id == project_id,
+               Attachment.state == "staged")
+        .values(state="attached"),
+    )
 
 
 def _fresh_session():

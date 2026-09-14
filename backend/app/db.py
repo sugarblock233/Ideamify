@@ -184,10 +184,35 @@ def _migrate_0001(conn) -> None:
         conn.execute(text(stmt))
 
 
+def _migrate_0002(conn) -> None:
+    # attachments 元数据：字节落在 RESEARCHMAP_STORAGE 目录（文件名 = id）。
+    # state 只有两态：staged（已上传未引用）→ attached（已被某条提交引用）。
+    # attached 永不删除（内容不可变，替换 = 新 id）；NOCASE 层面不加唯一约束——
+    # 同 sha256 幂等重传在写入端解析为返回已存在 id。
+    conn.execute(text("""
+    CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      original_name TEXT,
+      state TEXT NOT NULL CHECK (state IN ('staged','attached')),
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_attachments_project ON attachments(project_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_attachments_sha ON attachments(project_id, sha256)"))
+
+
 MIGRATIONS: list[tuple[int, str]] = [
     (1, "initial schema (projects/nodes/relations/commits/commit_nodes)"),
+    (2, "managed attachments (staged/attached, D 批 §9.2)"),
 ]
-_APPLY = {1: _migrate_0001}
+_APPLY = {1: _migrate_0001, 2: _migrate_0002}
 
 
 def init_db() -> None:

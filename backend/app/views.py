@@ -7,20 +7,27 @@ graph/export/context response never mixes two revisions (SPEC 7.1).
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import os
+import re
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import sqlalchemy.exc
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 
 from . import __version__
 from .auth import require_auth
+from .config import get_settings
 from .config import MAX_BODY_BYTES
 from .db import read_session
+from .db import write_txn as _write_txn
 from .errors import AppError, err, not_found
-from .models import Commit, CommitNode, Node, Project, Relation
+from .models import Attachment, Commit, CommitNode, Node, Project, Relation
 from .service import create_project, safe_sql_op, submit_commit
 
 router = APIRouter(prefix="/api/v1", tags=["researchmap"], dependencies=[Depends(require_auth)])
@@ -497,6 +504,155 @@ def export_project(pid: str) -> dict:
                 "commits": len(commits),
                 },
         }
+
+
+# ---------------------------------------------------------------------------
+# managed attachments (D 批 §9.2)
+#
+# 引用语法 `![alt](attachment:<uuid>)` 也允许出现在 evidence.value 里。字节
+# 永远存在 RESEARCHMAP_STORAGE 目录（文件名 = id），数据库只放元数据；Bearer
+# 令牌只走 Authorization 头，永远不出现在图片 URL 上（前端用 fetch+objectURL）。
+# ---------------------------------------------------------------------------
+
+ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024   # 单文件 10MB（2 MiB 全局 JSON 闸仅对此路径豁免）
+ATTACHMENT_MAX_PIXELS = 8000              # 单边像素上限
+ATTACHMENT_GC_DAYS = 30                   # staged 且引用不到、超 30 天 → 上传时顺带回收
+ATTACHMENT_REF = re.compile(r"attachment:([0-9a-fA-F-]{36})")
+
+
+def _att_record(a: Attachment) -> dict:
+    return {
+        "id": a.id, "project_id": a.project_id, "mime": a.mime, "bytes": a.bytes,
+        "sha256": a.sha256, "width": a.width, "height": a.height,
+        "original_name": a.original_name, "state": a.state,
+        "created_by": a.created_by, "created_at": a.created_at,
+    }
+
+
+def _storage_path(aid: str) -> str:
+    return os.path.join(get_settings().storage_dir, aid)
+
+
+def _gc_stale_staged(s) -> int:
+    """上传事务顺带的 GC：staged、超 30 天、且没有任何节点正文引用的行删除
+    （行 + 文件）。attached 永不删；无后台线程——回收成本挂在下一次上传上。"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=ATTACHMENT_GC_DAYS)).strftime(
+        "%Y-%m-%dT%H:%M:%S")
+    rows = list(s.scalars(select(Attachment).where(
+        Attachment.state == "staged", Attachment.created_at < cutoff)))
+    removed = 0
+    for a in rows:
+        referenced = s.execute(
+            select(func.count()).select_from(Node).where(
+                Node.project_id == a.project_id,
+                (Node.details_md.like(f"%attachment:{a.id}%")) |
+                (Node.evidence.like(f"%attachment:{a.id}%"))),
+        ).scalar_one()
+        if referenced:
+            continue
+        s.delete(a)
+        try:
+            os.remove(_storage_path(a.id))
+        except OSError:
+            pass
+        removed += 1
+    return removed
+
+
+@router.post("/projects/{pid}/attachments")
+async def upload_attachment(pid: str, file: UploadFile = File(...),
+                            actor: str = Depends(require_auth)) -> dict:
+    import io as _io
+    from .db import now_utc
+    with read_session() as s:
+        _get_project_row(s, pid)
+    raw = await file.read()
+    if len(raw) > ATTACHMENT_MAX_BYTES:
+        raise err(413, "REQUEST_TOO_LARGE",
+                  f"附件超过 {ATTACHMENT_MAX_BYTES // (1024 * 1024)}MB 上限")
+    if not raw:
+        raise AppError(422, "VALIDATION", "附件内容为空")
+    mime = (file.content_type or "").split(";")[0].strip().lower()
+    if not mime.startswith("image/"):
+        raise AppError(422, "VALIDATION", "受管附件目前仅接受图片（mime 必须是 image/*）")
+    # Pillow 决定尺寸并顺便验证内容确实是可解码图片（伪装扩展名/图片头的
+    # 二进制在此被 422 拦下）
+    try:
+        from PIL import Image, UnidentifiedImageError
+        with Image.open(_io.BytesIO(raw)) as im:
+            width, height = im.size
+    except ImportError:
+        raise AppError(500, "INTERNAL", "服务端缺少 Pillow，无法处理图片附件")
+    except (UnidentifiedImageError, OSError, ValueError) as e:
+        raise AppError(422, "VALIDATION", f"无法解码的图片附件: {e}")
+    if width > ATTACHMENT_MAX_PIXELS or height > ATTACHMENT_MAX_PIXELS:
+        raise AppError(422, "VALIDATION",
+                       f"图片尺寸 {width}x{height} 超过 {ATTACHMENT_MAX_PIXELS}px 上限")
+    digest = hashlib.sha256(raw).hexdigest()
+
+    with _write_txn() as s:
+        _get_project_row(s, pid)
+        # 同内容幂等：同项目同 sha256 直接返回已存在的行（不重复落盘）
+        existing = s.execute(select(Attachment).where(
+            Attachment.project_id == pid, Attachment.sha256 == digest,
+        )).scalar_one_or_none()
+        if existing is not None:
+            return _att_record(existing)
+        _gc_stale_staged(s)
+        aid = str(uuid.uuid4())
+        os.makedirs(get_settings().storage_dir, exist_ok=True)
+        tmp = _storage_path(aid + ".part")
+        with open(tmp, "wb") as f:
+            f.write(raw)
+        os.replace(tmp, _storage_path(aid))
+        row = Attachment(
+            id=aid, project_id=pid, mime=mime, bytes=len(raw), sha256=digest,
+            width=width, height=height, original_name=file.filename,
+            state="staged", created_by=actor, created_at=now_utc(),
+        )
+        s.add(row)
+        s.flush()
+        return _att_record(row)
+
+
+@router.get("/projects/{pid}/attachments")
+def list_attachments(pid: str,
+                     limit: int = Query(default=200, ge=1, le=1000),
+                     cursor: Optional[str] = None) -> dict:
+    """元数据列表（staged + attached）。与 commits 分页同约定：cursor 携带版
+    本戳，翻页期间项目发生提交 → 409 PAGINATION_STALE。"""
+    with read_session() as s:
+        p = _get_project_row(s, pid)
+        q = select(Attachment).where(Attachment.project_id == pid)
+        if cursor:
+            c = _dec_cursor(cursor)
+            if str(c.get("v")) != str(p.revision):
+                raise _stale()
+            q = q.where((Attachment.created_at, Attachment.id) <=
+                        (c["created_at"], c["id"]))
+        q = q.order_by(Attachment.created_at.desc(), Attachment.id).limit(limit + 1)
+        rows = list(s.scalars(q).all())
+        has_more = len(rows) > limit
+        page = rows[:limit]
+        next_cursor = (_enc_cursor({"v": p.revision, "created_at": page[-1].created_at,
+                                    "id": page[-1].id})
+                       if has_more and page else None)
+        return {"items": [_att_record(a) for a in page],
+                "next_cursor": next_cursor, "has_more": has_more}
+
+
+@router.get("/attachments/{aid}")
+def get_attachment_bytes(aid: str) -> FileResponse:
+    with read_session() as s:
+        a = s.get(Attachment, aid)
+        if a is None or not os.path.isfile(_storage_path(aid)):
+            raise not_found("附件不存在")
+        path = _storage_path(aid)
+        mime = a.mime
+        sha = a.sha256
+    # 字节按 id 即可达（id 是不可枚举的 uuid + 路由要求 Bearer）；不做项目级
+    # 二次校验——不提供任何列举他人附件的通道（DECISIONS §18）
+    return FileResponse(path, media_type=mime, headers={"ETag": f'"{sha}"'})
 
 
 # ---------------------------------------------------------------------------
