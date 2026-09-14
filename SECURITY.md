@@ -43,10 +43,11 @@ verified backups stored onto a separate host.
 1. **Check whether private vulnerability reporting is enabled** in the
    repository settings (the "Report a vulnerability" option in the issue menu).
    If it is enabled, **use it — that is the preferred channel.**
-2. If it is not enabled, notify the maintainer off-channel first (e.g. via
-   their GitHub profile), then optionally open an issue marked as sensitive
-   once the maintainer confirms. No email address is intentionally listed in
-   this file; do not guess or fabricate one.
+2. If it is not enabled, use **GitHub Discussions** on this repository to ask
+   the maintainer (@sugarblock233) to open a private channel, without
+   describing the vulnerability itself; share the details once they confirm.
+   GitHub Issues and Discussions are the project's only contact channels — no
+   email address is listed here, and you should not guess or fabricate one.
 3. **Do not** post exploit details, working PoC data, or real tokens in a
    public issue before a fix is available.
 

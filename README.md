@@ -2,8 +2,9 @@
 
 # Ideamify
 
-> Repository name **Ideamify** · the application (and its spec) is currently
-> named **ResearchMap**.
+> **Ideamify** is the project name. **ResearchMap** is what the running
+> application, its spec and its CLI are called; both names are settled and
+> used deliberately.
 
 **One line:** a self-hosted, lightweight web app in which one researcher and
 a few AI tools they trust **co-maintain a single research-evolution map** —
@@ -13,9 +14,8 @@ conditions under which they hold) survives changing AI tools or machines.
 
 Suitable for: a single researcher (with AI-assisted terminals) who wants a
 persistent, auditable, shared research memory on their own server. This is a
-**pre-release (0.x)** project: expect quick, honest fixes, no stability
-guarantee, and a license that is still being decided (see
-[LICENSE](#license)).
+**pre-release (0.x)** project: expect quick, honest fixes and no stability
+guarantee. Released under the [MIT License](LICENSE).
 
 ![ResearchMap main tree canvas — synthetic demo project: root, routes, node statuses, and the selected node's cross-branch relations (synthetic demo data)](docs/images/workspace-1440x900.png)
 _Main-tree canvas at 1440×900 with cross-branch relations. **Screenshots show synthetic demo data**, not real research results._
@@ -213,7 +213,6 @@ Docker and CI. The dev venv uses `requirements.txt`.
   container CI job exists exactly to prove them — until the first remote run
   passes, treat the built-image path as **configured, not yet verified here**.
 - Local-only docs carry paths (see note above).
-- No LICENSE yet (below).
 
 ## Roadmap (what has been documented as deferred)
 
@@ -229,9 +228,7 @@ creep in accidentally. No v0.2 feature set is decided yet.
 
 ## License
 
-**Pending — no LICENSE file is included in this repository yet.** The owner is
-currently deciding (G10 in `docs/QWEN_EXECUTION_PLAN.md`; MIT or Apache-2.0
-were considered). Until a license is published, the code is **unlicensed**:
-the default local copyright applies, and nothing in this repository grants
-permission to use, copy, or modify it. **Do not add a license badge** until
-the owner has decided.
+[MIT](LICENSE) — Copyright (c) 2026 sugarblock233.
+
+Screenshots and example data in this repository are synthetic; they are not
+research results and carry no claim of their own.

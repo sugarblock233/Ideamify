@@ -1,6 +1,6 @@
 # Contributing
 
-Ideamify (the app is currently named **ResearchMap** in the spec and UI) is a
+Ideamify (the app, spec and CLI are named **ResearchMap**) is a
 lightweight, self-hosted web app where one researcher and their trusted AI
 tools co-maintain a research-evolution map. This repo is maintained by a single
 owner; well-scoped, verified pull requests are welcome.
