@@ -446,3 +446,79 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .diff-row .v { white-space: pre-wrap; }
 
 .conn { font-size: 12px; color: var(--ink-dim); }
+
+/* ---------- B1: information-density tiers (DECISIONS §14) ---------- */
+/* The card box is always 280×144 (SPEC 2.4); tiers only change what is drawn.
+   reading = the unannotated baseline; compact = title + status dot + fold
+   button; overview = status color + glyph (+ new/changed badges). */
+
+/* low-interference mode: hide tags and relation/child counts */
+.rm-card.low-interf .row3 { display: none; }
+
+.rm-card .tier-glyph { display: none; }
+
+.rm-card.tier-compact .row1 .kind-badge,
+.rm-card.tier-compact .summary,
+.rm-card.tier-compact .row3 { display: none; }
+.rm-card.tier-compact .status-pill { background: none !important; }
+.rm-card.tier-compact .status-pill .dot { width: 11px; height: 11px; }
+.rm-card.tier-compact .title { font-size: 15px; margin-top: 12px; }
+.rm-card.tier-compact .tier-glyph {
+  display: block; position: absolute; right: 8px; bottom: 6px;
+  font-size: 20px; color: var(--st); opacity: .85;
+}
+
+.rm-card.tier-overview .row1,
+.rm-card.tier-overview .title,
+.rm-card.tier-overview .summary,
+.rm-card.tier-overview .row3 { display: none; }
+.rm-card.tier-overview {
+  background: color-mix(in srgb, var(--st) 16%, #ffffff);
+  border-left-width: 1.5px;
+}
+.rm-card.tier-overview.selected {
+  background: color-mix(in srgb, var(--st) 16%, #ffffff);
+}
+.rm-card.tier-overview .tier-glyph {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%;
+  font-size: 64px; color: var(--st); opacity: .9;
+}
+
+/* overview labels layer: screen-space, never zoom-scaled */
+.ovlayer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 20; }
+.ov-label {
+  position: absolute; pointer-events: none;
+  font-size: 12px; line-height: 18px; height: 18px;
+  color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: rgba(255, 255, 255, .92); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 6px;
+  box-shadow: 0 1px 3px rgba(20, 30, 50, .12);
+}
+.ov-label.ov-selected {
+  pointer-events: auto; cursor: pointer; z-index: 21;
+  border-color: var(--sel); color: var(--sel); font-weight: 600;
+}
+.ov-label.ov-selected:hover { background: var(--sel); color: #fff; }
+.ov-label.ov-selected b {
+  font-weight: 600; margin-right: 6px; padding-right: 6px;
+  border-right: 1px solid currentColor; color: var(--accent);
+}
+.ov-label.ov-selected:hover b { color: #fff; }
+
+/* status legend chip (canvas bottom-left, above the relation hint) */
+.legend { position: absolute; left: 12px; bottom: 18px; z-index: 30; }
+.legend > button {
+  font-size: 12px; background: rgba(255, 255, 255, .92);
+  border: 1px solid var(--line); border-radius: 8px; padding: 3px 10px;
+}
+.legend-pop { left: 0; bottom: 100%; min-width: 150px; margin-bottom: 4px; max-height: none; }
+.legend-row { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 12px; }
+.legend-glyph { width: 14px; text-align: center; color: var(--ink-dim); }
+
+/* density lock segment inside the view toolbar pop */
+.vtool .pop-item .seg {
+  font-size: 11px; padding: 1px 7px; margin-left: 4px;
+  border: 1px solid var(--line); border-radius: 5px; background: none; color: var(--ink-dim);
+}
+.vtool .pop-item .seg.on { background: var(--sel); border-color: var(--sel); color: #fff; }

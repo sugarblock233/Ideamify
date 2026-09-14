@@ -418,4 +418,14 @@ export const en: Record<keyof typeof zh, string> = {
   "a6.restore.title": "Return to the fold state before the last batch tool (card-level manual folds excluded)",
 
   "a7.search.title": "Search nodes",
+
+  "density.reading": "Reading",
+  "density.compact": "Compact",
+  "density.overview": "Overview",
+  "density.auto": "Auto",
+  "b1.legend": "Legend",
+  "b1.low.on": "Turn on low-interference mode",
+  "b1.low.off": "Turn off low-interference mode",
+  "b1.low.title": "Hide card labels, tags and relation/child counts (hovering a relation still shows its label)",
+  "b1.zoom.locate": "Zoom to locate",
 };

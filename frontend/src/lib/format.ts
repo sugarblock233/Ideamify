@@ -29,6 +29,18 @@ export const STATUS_COLOR: Record<NodeStatus, string> = {
   inconclusive: "var(--st-yellow)",
 };
 
+/** B1: language-independent status symbols for the compact/overview tiers
+ *  (DECISIONS §14 图形辅助编码) — color + shape stay legible when labels are
+ *  hidden, and translate the legend in both languages with no extra glyphs. */
+export const STATUS_GLYPH: Record<NodeStatus, string> = {
+  unexplored: "○",
+  in_progress: "◐",
+  promising: "◇",
+  supported: "✓",
+  not_supported: "✕",
+  inconclusive: "≈",
+};
+
 export function fmtTime(iso: string): string {
   const locale = getLang() === "en" ? "en-US" : "zh-CN";
   try {

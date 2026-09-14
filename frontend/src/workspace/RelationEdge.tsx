@@ -23,6 +23,7 @@ export interface RelData extends Record<string, unknown> {
   selfId: string;
   hovered: boolean;
   selected: boolean;
+  low?: boolean;
   onHover?: (id: string | null) => void;
   onClick?: (id: string) => void;
 }
@@ -44,7 +45,8 @@ export function RelationEdge({
     sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition,
     curvature: 0.25,
   });
-  const label = d.hovered || d.selected ? relationLabel(d.item, "") : null;
+  const label =
+    d.selected || (!d.low && d.hovered) ? relationLabel(d.item, "") : null;
 
   return (
     <g>
@@ -99,6 +101,9 @@ export function makeRelEdge(
   selected: boolean,
   onHover: (id: string | null) => void,
   onClick: (id: string) => void,
+  /** B1 低干扰: suppress the transient hover label (an explicit selection
+   *  still labels its relation — picking one is deliberate, not clutter). */
+  lowInterference = false,
 ): Edge {
   return {
     id,
@@ -110,6 +115,6 @@ export function makeRelEdge(
       item.kind !== "related"
         ? { type: MarkerType.ArrowClosed, width: 16, height: 16, color: selected ? "#274b8f" : "#a08c35" }
         : undefined,
-    data: { item, selfId, hovered, selected, onHover, onClick } as RelData,
+    data: { item, selfId, hovered, selected, low: lowInterference, onHover, onClick } as RelData,
   };
 }

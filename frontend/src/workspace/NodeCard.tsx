@@ -1,12 +1,18 @@
 /** Custom node: fixed-size main-tree card (SPEC 2.4 / 3.1).
  *  Cards show kind, status (label + color), title (≤2 lines), summary (≤2
  *  lines), direct child count and direct relation count. Never draggable /
- *  resizable in v0.1. */
+ *  resizable in v0.1.
+ *
+ *  B1: `tier` picks the presentation tier (DECISIONS §14) — the card box is
+ *  always CARD_W × CARD_H, tiers only change what is drawn (CSS classes
+ *  `.tier-compact` / `.tier-overview` on styles.css). `low` is the 低干扰 mode
+ *  (tags and relation/child counts hidden). */
 
 import React from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CARD_W, CARD_H } from "../lib/layout";
-import { STATUS_COLOR, kindLabel, statusLabel } from "../lib/format";
+import { STATUS_COLOR, STATUS_GLYPH, kindLabel, statusLabel } from "../lib/format";
+import type { DetailTier } from "../lib/detailLevel";
 import type { GraphNode } from "../lib/types";
 import { useT } from "../lib/i18n";
 
@@ -17,6 +23,8 @@ export interface CardData extends Record<string, unknown> {
   hasChildren: boolean;
   mark?: "new" | "changed" | undefined;
   badgeCount?: number;
+  tier?: DetailTier;
+  low?: boolean;
   onToggleFold?: (id: string) => void;
   onContextMenu?: (id: string, e: React.MouseEvent) => void;
 }
@@ -29,7 +37,7 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
 
   return (
     <div
-      className={`rm-card ${selected ? "selected" : ""}${n.archived ? " archived" : ""}`}
+      className={`rm-card tier-${d.tier ?? "reading"} ${selected ? "selected" : ""}${n.archived ? " archived" : ""}${d.low ? " low-interf" : ""}`}
       style={
         {
           borderLeftColor: STATUS_COLOR[n.status],
@@ -67,6 +75,7 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
           ))}
         </span>
       </div>
+      <div className="tier-glyph" aria-hidden>{STATUS_GLYPH[n.status]}</div>
       {(d.mark === "new" || d.mark === "changed") && (
         <span className={d.mark === "new" ? "new-badge" : "update-badge"}>
           {d.mark === "new" ? t("node.mark.new") : t("node.mark.changed")}

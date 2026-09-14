@@ -2,8 +2,10 @@
  *
  *  Presentational helpers wired to pure lib/expandTools.ts:
  *  - 全部展开 clears the whole fold set (the visible count is on the label);
- *  - the ▾ menu holds 展开到第 1–3 层, 展开选中节点的分支 and single-step
- *    恢复上次 (Workspace owns the pre-batch snapshot);
+ *  - the ▾ menu holds 展开到第 1–3 层, 展开选中节点的分支, single-step
+ *    恢复上次 (Workspace owns the pre-batch snapshot),
+ *    the B1 density lock (阅读/精简/概览/自动, DECISIONS §14) and the
+ *    低干扰 toggle — view prefs, both written to rm.prefs.<pid> by Workspace.
  *  - tools never write the branchRoot filter — "不清过滤" is asserted in e2e;
  *  - fitView is never called (the anchoring effect keeps the camera put).
  */
@@ -15,6 +17,7 @@ import {
   expandSubtreeFolds,
   expandToLevelFolds,
 } from "../lib/expandTools";
+import type { DensityMode } from "../lib/viewPrefs";
 import { useT } from "../lib/i18n";
 import type { GraphNode } from "../lib/types";
 
@@ -27,7 +30,14 @@ export interface ViewToolbarProps {
   onReplaceFolds: (next: ReadonlySet<string>) => void;
   onRestoreLast: () => void;
   canRestore: boolean;
+  /** B1/B4: density lock + 低干扰 (browser prefs owned by Workspace) */
+  density: DensityMode;
+  onSetDensity: (mode: DensityMode) => void;
+  lowInterference: boolean;
+  onToggleLowInterference: () => void;
 }
+
+const DENSITY_ORDER: DensityMode[] = ["reading", "compact", "overview", "auto"];
 
 export default function ViewToolbar(p: ViewToolbarProps) {
   const t = useT();
@@ -127,6 +137,28 @@ export default function ViewToolbar(p: ViewToolbarProps) {
               }}
             >
               {t("a6.restore")}
+            </div>
+            {/* B4 density lock: 阅读/精简/概览/自动 — "auto" resolves tiers
+                from zoom with hysteresis (lib/detailLevel.ts). */}
+            <div className="pop-item dotmenu-line" data-testid="vt-density" role="radiogroup">
+              {DENSITY_ORDER.map((m) => (
+                <button
+                  key={m}
+                  className={p.density === m ? "seg on" : "seg"}
+                  data-testid={`vt-density-${m}`}
+                  onClick={() => { p.onSetDensity(m); }}
+                >
+                  {t(`density.${m}`)}
+                </button>
+              ))}
+            </div>
+            <div
+              className={`pop-item dotmenu-line${p.lowInterference ? " on" : ""}`}
+              data-testid="vt-low-interf"
+              title={t("b1.low.title")}
+              onClick={() => p.onToggleLowInterference()}
+            >
+              {p.lowInterference ? t("b1.low.off") : t("b1.low.on")}
             </div>
           </div>
         )}

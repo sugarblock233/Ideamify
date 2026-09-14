@@ -420,6 +420,17 @@ export const zh = {
 
   // ---- TopBar 自适应三档（A7，full → more → icon） ------------------------------------
   "a7.search.title": "搜索节点",
+
+  // ---- 信息密度三档（B1/B4，DECISIONS §14） -------------------------------------------
+  "density.reading": "阅读",
+  "density.compact": "精简",
+  "density.overview": "概览",
+  "density.auto": "自动",
+  "b1.legend": "图例",
+  "b1.low.on": "开启低干扰模式",
+  "b1.low.off": "关闭低干扰模式",
+  "b1.low.title": "隐藏卡片的标签、关联数与子节点数（悬停关系线仍可看标签）",
+  "b1.zoom.locate": "放大定位",
 } as const;
 
 export type DictKey = keyof typeof zh;

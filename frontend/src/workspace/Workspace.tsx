@@ -26,6 +26,7 @@ import { statusLabel } from "../lib/format";
 import { useT } from "../lib/i18n";
 import { replaceDeepLink } from "../lib/deeplink";
 import Canvas, { loadSavedView, saveView } from "./Canvas";
+import { loadProjectViewPrefs, saveProjectViewPrefs, type DensityMode } from "../lib/viewPrefs";
 import SidePanel, {
   draftFieldLabel,
   type Draft,
@@ -107,6 +108,28 @@ export default function Workspace({
   const saved0 = useMemo(() => loadSavedView(pid), [pid]);
   const [folds, setFoldsRaw] = useState<ReadonlySet<string>>(new Set(saved0.folds));
   const [branchRoot, setBranchRoot] = useState<string | null>(saved0.branchRoot);
+
+  // B1: per-project view prefs (density lock / 低干扰) — browser-only, one
+  // load per project switch, writes go straight through saveProjectViewPrefs.
+  const [density, setDensityRaw] = useState<DensityMode>(
+    () => loadProjectViewPrefs(pid).density,
+  );
+  const [lowInterference, setLowInterference] = useState<boolean>(
+    () => loadProjectViewPrefs(pid).lowInterference,
+  );
+  useEffect(() => {
+    const vp = loadProjectViewPrefs(pid);
+    setDensityRaw(vp.density);
+    setLowInterference(vp.lowInterference);
+  }, [pid]);
+  const setDensity = useCallback(
+    (mode: DensityMode) => setDensityRaw(saveProjectViewPrefs(pid, { density: mode }).density),
+    [pid],
+  );
+  const toggleLowInterference = useCallback(
+    () => setLowInterference(saveProjectViewPrefs(pid, { lowInterference: !lowInterference }).lowInterference),
+    [pid, lowInterference],
+  );
 
   const [pendingLocate, setPendingLocate] = useState<{ nodeId: string } | null>(null);
   const [pendingRev, setPendingRev] = useState<number | null>(null);
@@ -1044,6 +1067,8 @@ async function rebaseDraft() {
             onLoadUpdates={() => void loadUpdates()}
             fitSignal={fitSignal}
             onToast={ironToast}
+            density={density}
+            lowInterference={lowInterference}
           />
           {toast && <div className={`toast ${toast.kind === "err" ? "err" : "ok"}`}>{toast.msg}</div>}
           <ViewToolbar
@@ -1054,6 +1079,10 @@ async function rebaseDraft() {
             onReplaceFolds={replaceFolds}
             onRestoreLast={restoreLastFolds}
             canRestore={canRestore}
+            lowInterference={lowInterference}
+            onToggleLowInterference={toggleLowInterference}
+            density={density}
+            onSetDensity={setDensity}
           />
         </div>
 

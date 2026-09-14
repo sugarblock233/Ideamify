@@ -22,11 +22,14 @@ import {
   type Node,
 } from "@xyflow/react";
 import { computeLayout, CARD_W, CARD_H, rootIdOf, type LayoutResult } from "../lib/layout";
-import { STATUS_COLOR } from "../lib/format";
-import type { GraphNode, Project, RelationItem } from "../lib/types";
+import { STATUS_COLOR, STATUS_GLYPH } from "../lib/format";
+import { resolveTier, type DetailTier } from "../lib/detailLevel";
+import type { DensityMode } from "../lib/viewPrefs";
+import type { GraphNode, NodeStatus, Project, RelationItem } from "../lib/types";
 import { selectCanvasRelations } from "../lib/relations";
 import { NodeCard, type CardData } from "./NodeCard";
 import { RootCard, type RootData } from "./RootCard";
+import OverviewLabels, { type OverviewLabelItem } from "./OverviewLabels";
 import { RelationEdge, makeRelEdge } from "./RelationEdge";
 import { deepLinkHref } from "../lib/deeplink";
 import { useT } from "../lib/i18n";
@@ -68,6 +71,10 @@ export interface CanvasProps {
   onLoadUpdates: () => void;
   fitSignal: number;
   onToast: (msg: string, kind?: "ok" | "err") => void;
+  /** B1: density lock from rm.prefs.<pid> ("auto" = zoom-driven tiers) and the
+   *  低干扰 choice — both browser prefs, never server state. */
+  density: DensityMode;
+  lowInterference: boolean;
 }
 
 function Inner(p: CanvasProps) {
@@ -83,6 +90,29 @@ function Inner(p: CanvasProps) {
     if (p.pendingRevision == null) return;
     setBannerDismissed(false);
   }, [p.pendingRevision]);
+
+  // ---- B1 information-density tier -----------------------------------------
+  // The zoom is tracked in a ref (never React state) so panning/zooming does
+  // not rerender cards per frame; only a tier CROSSING calls setTier, and Node
+  // cards are memoized on their data so unchanged cards keep their props.
+  const [tier, setTier] = useState<DetailTier>("reading");
+  const tierRef = useRef(tier);
+  tierRef.current = tier;
+  const zoomRef = useRef<number | null>(null);
+
+  const onMove = useCallback(() => {
+    zoomRef.current = flow.getViewport().zoom;
+    const next = resolveTier(tierRef.current, p.density, zoomRef.current);
+    if (next !== tierRef.current) setTier(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.density, flow]);
+
+  // An explicit lock re-resolves immediately against the last seen zoom.
+  useEffect(() => {
+    if (zoomRef.current == null) return;
+    const next = resolveTier(tierRef.current, p.density, zoomRef.current);
+    if (next !== tierRef.current) setTier(next);
+  }, [p.density]);
 
   // ---- layout (pure, deterministic) --------------------------------------
   const layout: LayoutResult = useMemo(
@@ -167,6 +197,8 @@ function Inner(p: CanvasProps) {
           hasChildren: n.child_count > 0 || pos.hiddenCount > 0,
           mark,
           badgeCount: p.marks.badges.get(n.id),
+          tier,
+          low: p.lowInterference,
           onToggleFold,
           onContextMenu: onCtx,
         } as CardData,
@@ -175,13 +207,54 @@ function Inner(p: CanvasProps) {
     return out;
     // structKey covers graph/folds/branchRoot; marks/relations refresh data
     // without needing structural bookkeeping.
-  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, onToggleFold, onCtx]);
+  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, onToggleFold, onCtx, tier, p.lowInterference]);
 
   // Selected node's direct relations eligible for canvas lines (≤ MAX_CANVAS_RELATION).
   const shownRels = useMemo(() => {
     if (!p.selectedId || !layout.visibleIds.has(p.selectedId)) return [];
     return selectCanvasRelations(p.relations, p.selectedId, layout.visibleIds, p.selectedRelationId).shown;
   }, [p.relations, p.selectedId, layout, p.selectedRelationId]);
+
+  // B1: overview-layer items — the visible branch tops (tree top-level routes,
+  // or the branch tops when a branch filter is on). Positions are layout px;
+  // OverviewLabels projects them to screen space itself.
+  const ovItems = useMemo<OverviewLabelItem[]>(() => {
+    if (tier !== "overview") return [];
+    const rootId = rootIdOf(p.projectId);
+    const byId = new Map(p.graph.map((g) => [g.id, g]));
+    const out: OverviewLabelItem[] = [];
+    for (const [id, pos] of layout.positions) {
+      if (id === rootId) continue;
+      const gn = byId.get(id);
+      if (!gn) continue;
+      const isTop = gn.parent_id === null || (p.branchRoot !== null && gn.parent_id === p.branchRoot);
+      if (!isTop) continue;
+      out.push({ id, depth: 1, order: pos.y * 10000 + pos.x, x: pos.x, y: pos.y, title: gn.title });
+    }
+    return out;
+  }, [tier, layout, p.graph, p.branchRoot, p.projectId]);
+
+  const onZoomToNode = useCallback(
+    (id: string) => {
+      const pos = layout.positions.get(id);
+      if (!pos) return;
+      flow.setCenter(pos.x + CARD_W / 2, pos.y + CARD_H / 2, { zoom: READABLE_ZOOM, duration: 280 });
+    },
+    [layout, flow],
+  );
+
+  // The selected node's floating overview label (null when hidden out of the
+  // visible tree, the virtual root, or outside the overview tier).
+  const ovSelected = useMemo<OverviewLabelItem | null>(() => {
+    if (tier !== "overview") return null;
+    const rootId = rootIdOf(p.projectId);
+    const sel = p.selectedId;
+    if (!sel || sel === rootId || !layout.visibleIds.has(sel)) return null;
+    const pos = layout.positions.get(sel);
+    if (!pos) return null;
+    const title = p.graph.find((g) => g.id === sel)?.title ?? "";
+    return { id: sel, depth: 0, order: 0, x: pos.x, y: pos.y, title };
+  }, [tier, layout, p.selectedId, p.graph, p.projectId]);
 
   const edges = useMemo<Edge[]>(() => {
     const out: Edge[] = [];
@@ -212,12 +285,13 @@ function Inner(p: CanvasProps) {
             p.selectedRelationId === cr.relation.id,
             setHoveredRel,
             (rid) => p.onPickRelation(rid),
+            p.lowInterference,
           ),
         );
       }
     }
     return out;
-  }, [layout, p.graph, p.selectedId, p.selectedRelationId, p.relations, hoveredRel, p.onPickRelation, p.projectId, shownRels]);
+  }, [layout, p.graph, p.selectedId, p.selectedRelationId, p.relations, hoveredRel, p.onPickRelation, p.projectId, shownRels, p.lowInterference]);
 
   // ---- viewport stability --------------------------------------------------
   useEffect(() => {
@@ -364,6 +438,7 @@ function Inner(p: CanvasProps) {
         onPaneClick={onPaneClick}
         onInit={onInit}
         onMoveEnd={onMoveEnd}
+        onMove={onMove}
         nodesDraggable={false}
         nodesConnectable={false}
         nodesFocusable={false}
@@ -438,6 +513,14 @@ function Inner(p: CanvasProps) {
         );
       })()}
 
+      {/* B1: the legend translates color+glyph back to labels while cards hide
+          theirs (coarse tiers or 低干扰); the pop lists for the 6 enums. */}
+      <LegendChip visible={tier !== "reading" || p.lowInterference} />
+
+      {tier === "overview" && (
+        <OverviewLabels items={ovItems} selected={ovSelected} onZoomIn={onZoomToNode} />
+      )}
+
       {ctxMenu && (
         <CtxMenu
           menu={ctxMenu}
@@ -465,6 +548,42 @@ export default function Canvas(p: CanvasProps) {
 }
 
 // ---------------------------------------------------------------------------
+
+const LEGEND_ORDER: NodeStatus[] = [
+  "unexplored",
+  "in_progress",
+  "promising",
+  "supported",
+  "not_supported",
+  "inconclusive",
+];
+
+/** B1: status legend chip. Collapsed to a button while cards still show their
+ *  labels; expands to the six status dots+glyphs whenever the coarse tiers or
+ *  低干扰 hide them on the cards. Pure display — never a click-through layer. */
+function LegendChip({ visible }: { visible: boolean }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  if (!visible && !open) return null;
+  return (
+    <div className="legend" data-testid="legend">
+      {open && (
+        <div className="pop legend-pop">
+          {LEGEND_ORDER.map((s) => (
+            <div className="legend-row" key={s}>
+              <span className="dot" style={{ background: STATUS_COLOR[s] }} />
+              <span className="legend-glyph">{STATUS_GLYPH[s]}</span>
+              <span>{t(`status.${s}`)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <button data-testid="legend-toggle" onClick={() => setOpen((v) => !v)}>
+        {t("b1.legend")}
+      </button>
+    </div>
+  );
+}
 
 function Breadcrumbs({
   graph,
