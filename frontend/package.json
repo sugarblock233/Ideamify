@@ -1,8 +1,13 @@
 {
   "name": "researchmap-frontend",
+  "description": "Frontend for ResearchMap (Ideamify) — research-evolution maps shared by one researcher and their trusted AI tools",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sugarblock233/Ideamify.git"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

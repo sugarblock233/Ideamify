@@ -1,94 +1,237 @@
-# ResearchMap
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-**科研演化地图（v0.1）**：一个部署在你自己服务器上的轻量 Web 应用，让一位研究者和他信任的若干 AI 工具**共同维护同一份研究地图**——从问题分出路线，记录尝试、观察、成功、失败与决定；过去的探索（尤其负结果和它成立的条件）在换 AI、换设备之后依然可继承。
+# Ideamify
 
-> 核心设计：数据允许跨分支关联；排版只依据主树；跨分支连线按需显示。折叠绝不丢数据。
+> Repository name **Ideamify** · the application (and its spec) is currently
+> named **ResearchMap**.
 
-## 能做什么（v0.1）
+**One line:** a self-hosted, lightweight web app in which one researcher and
+a few AI tools they trust **co-maintain a single research-evolution map** —
+routes from a question, with trials, observations, successes, failures, and
+decisions — so that past exploration (especially negative results and the
+conditions under which they hold) survives changing AI tools or machines.
 
-- 浏览器中的项目地图（主树自动布局），节点编辑、折叠、深链定位
-- 四类数据：Project / Node / Relation / Commit（变更历史天然成为审计日志）
-- 五种跨分支关系（相关 / 启发 / 支持 / 矛盾 / 推导自），默认不画线，选中节点才显示
-- 红色状态（当前条件下不支持）强制填写范围、发现、决定与至少一条证据
-- AI 读取上下文（含近邻与祖先链）与**幂等批量增量提交**（请求指纹 + 版本冲突 409 + 同一 `request_id` 重试语义）
-- 导出（JSON）、命令行备份/校验/恢复（SQLite 在线备份）
-- 单容器 + 一个持久卷；令牌身份制（每个令牌 = 一个提交者身份，AI 不可冒充人）
+Suitable for: a single researcher (with AI-assisted terminals) who wants a
+persistent, auditable, shared research memory on their own server. This is a
+**pre-release (0.x)** project: expect quick, honest fixes, no stability
+guarantee, and a license that is still being decided (see
+[LICENSE](#license)).
 
-**明确不做**：自动科研执行、训练/GPU 管理、内置模型调用、向量/图数据库、多人实时协作、自由白板、权限体系。没有模型 API Key 也能跑全部核心功能。规格边界见 [`docs/SPEC.md`](docs/SPEC.md)。
+![ResearchMap main tree canvas — synthetic demo project: root, routes, node statuses, and the selected node's cross-branch relations (synthetic demo data)](docs/images/workspace-1440x900.png)
+_Main-tree canvas at 1440×900 with cross-branch relations. **Screenshots show synthetic demo data**, not real research results._
 
-## 快速开始
+![ResearchMap node detail read view — title, status, scope, finding, decision, and evidence items (synthetic demo data)](docs/images/detail-panel-1280x800.png)
+_Node detail read view at 1280×800 (also synthetic demo data)._
+
+## Core features
+
+- **Main tree + cross-branch relations.** Every node hangs off exactly one
+  parent (the layout axis); an independent relations layer connects nodes
+  across branches (related / motivates / supports / contradicts / depends_on).
+  Lines are drawn on demand, not by default.
+- **Research states with an evidence gate.** Six statuses from `unexplored`
+  to `supported` / `not_supported`; red and green *require* scope, finding,
+  decision, and at least one evidence reference — enforced server-side.
+  Red is "not supported under these conditions", not permanently disproven.
+- **Commit history as audit log.** Every change is an atomic, attributed
+  commit with before/after diffs; anyone can see who changed what and why,
+  and old versions stay readable.
+- **External AI via API and CLI.** No built-in model: external AIs read a
+  budgeted `context` endpoint and write small idempotent incremental commits
+  with optimistic version control (`request_id` + `expected_revision`, 409
+  conflict semantics). The thin CLI `tools/researchmap.py` speaks plain HTTP.
+- **Export and backup.** Full JSON export per project; offline backup/verify/
+  restore tooling built on SQLite online backup (`tools/backup.py`).
+
+## What it deliberately does not do
+
+- **No built-in LLM** — there are no model calls anywhere in the app, and it
+  never goes looking for your keys.
+- **No automated research execution** — no training/GPU/Slurm management, no
+  automatic paper reading, no experiment orchestration.
+- **No model API key required.** All core features work without one.
+- **No multi-tenancy.** Not a public platform: one researcher's trusted
+  circle only.
+- Also out: free-form whiteboard, vector/graph databases, real-time
+  multi-user cursors, MCP as a service, mobile-first layouts.
+  Full boundary: [`docs/SPEC.md`](docs/SPEC.md) §0.
+
+## Quick start
+
+Prerequisites: a machine with Docker (Compose plugin) and a terminal.
 
 ```bash
 git clone https://github.com/sugarblock233/Ideamify.git
 cd Ideamify
-cp .env.example .env        # 改 RESEARCHMAP_TOKENS 里的两个令牌（各 ≥12 字符）
+cp .env.example .env
+```
+
+Edit `.env` — set **two personal tokens**, each ≥ 12 chars, different from
+each other (the token *name* becomes the author-identity on commits):
+
+```dotenv
+RESEARCHMAP_TOKENS={"researcher":"my-researcher-token-0001","ai-one":"my-ai-one-token-0002"}
+RESEARCHMAP_PORT=8000
+```
+
+Then:
+
+```bash
 docker compose up -d --build
-# 打开 http://localhost:8000/ ，登录界面输入令牌
 ```
 
-数据只落在卷 `researchmap-data`（SQLite 单文件 `/data/researchmap.db`）。备份：
+Open **http://127.0.0.1:8000/** and log in with the researcher token. From a
+fresh database you can, entirely in the browser: log in → create your first
+project → add top-level routes and child nodes → save → refresh → log back
+in, with the content intact.
 
-```bash
-python tools/backup.py backup --db <db文件> --out ./backup/ --json   # 在线备份 + SQL + JSON 快照
-python tools/backup.py verify --db ./backup/researchmap-<ts>.db
-python tools/backup.py restore --src <备份文件> --dst <目标> --server-stopped --yes
-```
+### Key configuration
 
-## 本地开发
-
-```bash
-# 后端（FastAPI + SQLite）
-cd backend && python -m venv .venv && .venv/bin/pip install -r requirements.txt
-RESEARCHMAP_TOKENS='{"researcher":"your-token-0001"}' RESEARCHMAP_DB=/tmp/rm-dev.db \
-  .venv/bin/python -m uvicorn app.main:app --port 8000
-
-# 前端（React + Vite + @xyflow/react）
-cd frontend && npm ci && npm run dev     # http://localhost:5173，/api 代理到 8000
-```
-
-## 目录结构
-
-```
-backend/            FastAPI 应用（app/）+ 冒烟测试（tests/）
-frontend/           React + TS 前端（src/lib 布局与共享逻辑，src/workspace 画布）
-tools/              researchmap.py —— AI/人用的读写 CLI；backup.py —— 备份/恢复
-scripts/            stress_test.py —— 1100+ 节点 / 3000 关联压测（自愈，自带 scratch 服务）
-examples/           四类 commit 的 JSON 模板（骨架 / 红色尝试 / 续写 / 幕间调整）
-docs/               SPEC（规格）、DECISIONS（实现决策）、AI_USAGE（AI 接入协议）
-```
-
-## AI 怎么读写这份地图
-
-完整协议见 [`docs/AI_USAGE.md`](docs/AI_USAGE.md)，可直接复制的 commit 模板在 [`examples/`](examples/)。
-
-1. `GET /api/v1/projects/{pid}/context` —— 一段文字世界状态（概览 + 近邻 + 祖先链，支持聚焦）
-2. 在应用之外做自己的事（调研 / 写码 / 实验）
-3. `POST /api/v1/projects/{pid}/commits` —— 小批量增量提交，必须带 `request_id`（UUID）与
-   `expected_revision`。**冲突 409 意味着本次提交未被记录**：刷新版本后可沿用原 `request_id` 重发，
-   内容相同则幂等重放（`already_committed: true`）。
-4. `tools/researchmap.py` 封装了上述流程（`context / search / commit / projects …`，`--auto-rev` 自动取版本）
-
-端到端实录（真实命令 + 真实输出，含 422 证据门、幂等重放、409 竞争重试）：[`docs/ai-session-example.md`](docs/ai-session-example.md)。
-
-## 测试与验收
-
-| 套件 | 结果 |
+| Variable | Meaning |
 | --- | --- |
-| 后端冒烟 `backend/tests/api_smoke.py`（鉴权、提交管线、幂等、409、证据门、归档、导出、并发写者…） | 61/61 通过 |
-| 前端单测 `frontend/`（布局、折叠、关联端点、压测图 1104 节点不重叠） | 32/32 通过 |
-| 浏览器 E2E `frontend/e2e/smoke.spec.ts`（Playwright，生产形同源部署） | 4/4 通过 |
-| 压测 `scripts/stress_test.py`（4104 操作 / 87 提交，p50 26ms） | 通过，结构断言全过 |
-| 备份 / 恢复演练 | 通过（在线备份 vs 裸拷 WAL 库的安全性对比见 DECISIONS §11） |
-| `docker compose build` | 文件就绪；请在有 Docker 的机器上执行 |
+| `RESEARCHMAP_TOKENS` | Inline JSON (or a file path) mapping **name → bearer token**. That name is the actor identity in commit records. Treat tokens as root for the instance — see [SECURITY.md](SECURITY.md). |
+| `RESEARCHMAP_PORT` | Host port (default `8000`). |
 
-实现过程中的小决策统一记录在 [`docs/DECISIONS.md`](docs/DECISIONS.md)。
+- **Loopback by default.** Compose publishes `127.0.0.1:$RESEARCHMAP_PORT:8000`
+  — reachable only from the host. Remote access is your job: put it behind
+  your own protected network / HTTPS proxy; the project will not reconfigure
+  your SSH, firewall, or tunnels.
+- **Data location.** Everything lives in the `researchmap-data` volume as a
+  single SQLite file (`/data/researchmap.db`). Rebuilding/restarting the
+  container must not clear it.
+- **Re-authentication on refresh.** Tokens are held in page memory only;
+  a browser refresh logs you out. That is intentional (v0.1).
+- **Export & backup.**
 
-## 安全模型（单研究者信任域）
+  ```bash
+  python3 tools/backup.py backup  --db <db-file> --out ./backup/ --json
+  python3 tools/backup.py verify  --db ./backup/researchmap-<ts>.db
+  python3 tools/backup.py restore --src <backup> --dst <target> --server-stopped --yes
+  ```
 
-- 认证 = Bearer 令牌。仓库内联 JSON `{"名字": "令牌"}`；令牌一经配置，**名字即提交记录里的 actor 身份**，无法伪造
-- 不做多租户；任何持有令牌的会话可读写全部项目——请把令牌视为根凭据
-- `.env` 不入库（`.gitignore`）；令牌只在运行时配置，镜像里不存在
+  Backups contain no token configuration and do not include the external
+  files that evidence paths reference. Keep a copy of a backup on separate
+  storage.
+
+## Let an external AI read and write the map
+
+Full protocol: [`docs/AI_USAGE.md`](docs/AI_USAGE.md). Copy-paste commit
+templates: [`examples/`](examples/). The minimal loop, env vars only —
+tokens never appear in command lines, samples, or logs:
+
+```bash
+export RESEARCHMAP_BASE_URL=http://127.0.0.1:8000
+export RESEARCHMAP_TOKEN="<your personal token>"     # ai-one for an AI terminal
+
+python3 tools/researchmap.py health
+python3 tools/researchmap.py context <project_id>           # budgeted world state
+python3 tools/researchmap.py commit <project_id> delta.json --dry-run
+python3 tools/researchmap.py commit <project_id> delta.json
+```
+
+`delta.json` is a full commit request — its own `request_id` (a UUID you
+generate) *and* the `expected_revision` you read from the project, before
+operations. Copy [`examples/skeleton.json`](examples/skeleton.json) and edit.
+
+Conflict handling, stated precisely:
+
+- **`409 REVISION_CONFLICT` — the commit was not recorded.** Re-read the
+  context, then **re-send the same `request_id`** with the fresh
+  `expected_revision` (the error's `details.current_revision` tells you).
+- **`409 IDEMPOTENCY_KEY_REUSED`** — the same `request_id` was already
+  committed with *different* content. Generate a new UUID. Re-sending a
+  *fully identical* payload is a safe idempotent replay
+  (`already_committed: true`).
+
+## Development & tests
+
+Baseline toolchain: **Python 3.13, Node 22** (matching the Docker image and
+CI).
+
+```bash
+# backend
+cd backend
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+RESEARCHMAP_DB=/tmp/rm-dev.db \
+RESEARCHMAP_TOKENS='{"dev-researcher":"dev-token-0001","dev-ai":"dev-ai-token-0001"}' \
+  .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+# frontend (in another terminal)
+cd frontend
+npm ci && npm run dev            # :5173, proxies /api to :8000
+npm test                         # vitest unit tests
+npm run build                    # tsc --noEmit + production build
+npm run build && npx playwright test    # browser e2e (production-shaped server)
+
+# backend tests
+cd backend && .venv/bin/python -m pytest tests -q
+
+# optional synthetic load test (self-contained scratch server)
+python3 scripts/stress_test.py
+```
+
+Use a scratch database (`/tmp/...`) for dev and tests — never `data/` or the
+deployment volume. The locked file `backend/requirements.lock.txt` is used by
+Docker and CI. The dev venv uses `requirements.txt`.
+
+## Documentation map
+
+| File | What it is |
+| --- | --- |
+| [`docs/SPEC.md`](docs/SPEC.md) | Product & technical specification — the source of product semantics |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Implementation decisions made where the SPEC was silent |
+| [`docs/AI_USAGE.md`](docs/AI_USAGE.md) | External AI protocol (read → dry-run → commit → conflict → handoff) |
+| [`docs/QWEN_EXECUTION_PLAN.md`](docs/QWEN_EXECUTION_PLAN.md) | Execution plan for the current fix/governance batch (A/B/D/G items; G10 = owner decisions) |
+| [`docs/implementation-results.md`](docs/implementation-results.md) | Per-task execution evidence and remaining limitations |
+| [`examples/`](examples/) | Labeled-synthetic commit request templates |
+| [`scripts/`](scripts/) | Stress/load test |
+
+> Note: `docs/QWEN_EXECUTION_PLAN.md` and `docs/acceptance-2026-09-13/`
+> still carry local development paths; a sanitized public version is being
+> prepared before wider release.
+
+## Contributing, issues, support
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, commit/PR
+  conventions, test matrix, language policy, data/credential rules.
+- [AGENTS.md](AGENTS.md) — operating rules for AI agents.
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — how we work together here.
+- Issues: use the provided templates (English or Chinese are both fine).
+  Security reports go through [SECURITY.md](SECURITY.md), not public issues.
+- No mailing list or IRC: this is a single-maintainer project; issues and
+  release notes are the channels.
+
+## Known limitations (honest list)
+
+- **Pre-release 0.x.** API/CLI/schema may change; see versioning note in
+  [CHANGELOG.md](CHANGELOG.md).
+- **Remote CI has not run yet.** The workflow in `.github/workflows/ci.yml`
+  is configured and tool-consistent, but has not been executed on GitHub as
+  of this commit (no remote here yet).
+- **Container path not re-verified locally.** This development host has no
+  Docker; `Dockerfile` + `compose.yaml` were written and reviewed, and the
+  container CI job exists exactly to prove them — until the first remote run
+  passes, treat the built-image path as **configured, not yet verified here**.
+- Local-only docs carry paths (see note above).
+- No LICENSE yet (below).
+
+## Roadmap (what has been documented as deferred)
+
+Nothing below is promised; it is carried over from the project's documented
+deferred list (`docs/QWEN_EXECUTION_PLAN.md` §10) precisely so scope does not
+creep in accidentally. No v0.2 feature set is decided yet.
+
+- No: automated npm/PyPI publish, complex branching models, CLA systems,
+  maintainer org management, auto-close bots, auto-merging all dependency
+  upgrades, GitHub Pages docs site, public online demo, paid code-quality
+  platforms, full UI i18n, CITATION.cff/DOI automation, complex release
+  automation or multi-platform image matrices.
 
 ## License
 
-待定（请在 `LICENSE` 中补充后发布）。
+**Pending — no LICENSE file is included in this repository yet.** The owner is
+currently deciding (G10 in `docs/QWEN_EXECUTION_PLAN.md`; MIT or Apache-2.0
+were considered). Until a license is published, the code is **unlicensed**:
+the default local copyright applies, and nothing in this repository grants
+permission to use, copy, or modify it. **Do not add a license badge** until
+the owner has decided.
