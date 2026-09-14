@@ -194,6 +194,10 @@ SPEC 未规定、实现中被迫选定的事，逐条记在这里（含理由与
 - 确定性与不重叠**按模式成立**：同 (树, order, folds, mode) 出同坐标；
   `layout.test`/`layout.stress` 以 `describe.each` 双模式回归，h 的旧
   坐标断言原样保留、v 是新增期望。
+- **性能实测（B5 决定不落 perf 提交）**：1104 节点 fixture 上
+  `computeLayout` 均值 h 0.8 ms / v 0.7 ms（2026-09-14，各 10 次取均），
+  远低于既定的 ~250 ms 单趟重写阈值，现状分支 BFS 不需替换；如未来
+  超阈值再按既定方案落单趟可见性。
 - **大纲不走 layout.ts**：`OutlineView` 直接复用
   `buildTreeData`（折叠/分支语义与画布字面共享），文字行没有坐标；
   选中态跨模式天然保持（同一 selectNode）。
@@ -214,12 +218,22 @@ SPEC 未规定、实现中被迫选定的事，逐条记在这里（含理由与
 - **E2E 钉 zh-CN**（`playwright.config.ts use.locale`）：旧 spec 的
   中文可访问名选择器不受语言切换影响；新控件同时带 `data-testid`。
 
-## 尚未完成 / 未验证
-- **仅一项未验证**：`Dockerfile` + `compose.yaml` + `.env.example`
-  已写好，但本开发环境没有 docker，`docker compose build` 未执行。
-  用户侧一条命令：`cp .env.example .env`（改两个令牌）后
-  `docker compose up -d --build`，访问 http://localhost:8000/。
-- 其余验收均已实跑：后端 61/61 冒烟、前端 32/32 单测、1000+ 节点
-  压测（4104 操作/87 提交/2.3 s，结构断言全过）、浏览器 E2E
-  4/4（playwright，生产形同源部署下）、备份/恢复演练、独立
-  terminal 的 AI 会话实录。
+## 验收状态（2026-09-14，Docker 补验后无未验证项）
+- **容器验证已补做（2026-09-14）**：开发环境已具备 Docker
+  （29.4.0 / compose v5.1.2），以完全隔离的演练项目完成全流程：
+  `docker compose -p <scratch> build` + `up -d`（镜像 researchmap:0.1，
+  healthcheck 转 healthy）→ `/healthz`、静态首页、`session` →
+  CLI 创建项目、`commit --dry-run`、提交 `node.create`、读回节点与
+  `graph` → `tools/backup.py backup --db /data/researchmap.db --out …
+  --json`（db+sql+json 三份副本，integrity ok）→ 重启容器数据仍在
+  （卷持久化）→ `down -v` 清理。演练用独立 `-p` 项目名与 `RESEARCHMAP_PORT`
+  临时端口，未触及已有数据卷和本机 8000 的开发服务器。两个注记：
+  compose 对每个子命令都要能取到 `RESEARCHMAP_TOKENS`（插值先于命令）；
+  `docker compose run` 里 `--json` 的 `RESEARCHMAP_BASE_URL` 要指向
+  服务名 `http://researchmap:8000`——run 容器内 127.0.0.1 是它自己。
+- 其余验收均已实跑：后端 61/61 冒烟、前端单测 95/95（A+B 新增
+  viewPrefs/i18n/expandTools/detailLevel/双模式 layout 等套件）、
+  1104 节点压测双模式（见 §15 计时；0.1 期的 4104 操作/87 提交/2.3 s
+  压测仍有效）、浏览器 E2E 39/39（playwright，生产形同源部署下，
+  含 collab/bigmap/layouts 等全套）、备份/恢复演练、独立 terminal
+  的 AI 会话实录。
