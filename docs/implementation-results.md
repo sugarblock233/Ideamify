@@ -349,6 +349,14 @@ push 直接触发了 `.github/workflows/ci.yml` 的第一次远端执行：
 这条把 §6-1、§3-4 里两个"待远端权限"一次结清：container job 在 **CI 机器上**真的构建并跑通了，
 这正是"本机容器已验证"**不能**替代的那一件事。
 
+其后又有两次 push，各自都触发了新的 run，同样 5/5 全绿：
+
+| run | 提交 | 结果 |
+| --- | --- | --- |
+| [34816758423](https://github.com/sugarblock233/Ideamify/actions/runs/34816758423) | 首次 push（改写后的历史） | 5/5 全绿，1m9s |
+| [34817306222](https://github.com/sugarblock233/Ideamify/actions/runs/34817306222) | `e104261`（**tag `v0.1.0` 打在此提交**） | 5/5 全绿 |
+| [34817586763](https://github.com/sugarblock233/Ideamify/actions/runs/34817586763) | `07f7138`（发布记录收尾） | 5/5 全绿，1m15s |
+
 唯一注解：`actions/checkout` / `setup-node` / `setup-python` 被钉住的 SHA 仍声明 node20 运行时，
 GitHub 强制它们跑在 node24 上并给出弃用警告。**不影响结果**，但记在 §6-8 作为残留项。
 
