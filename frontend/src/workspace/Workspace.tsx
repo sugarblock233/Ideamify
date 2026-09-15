@@ -251,6 +251,8 @@ export default function Workspace({
 
   const [modalProject, setModalProject] = useState<"" | "create" | "edit">("");
   const [aiAccessOpen, setAiAccessOpen] = useState(false);
+  // 38: 版本管理入口（创建/重命名/排序/归档科研版本，全部走 commit 通道）
+  const [verMgrOpen, setVerMgrOpen] = useState(false);
   const [createRelFrom, setCreateRelFrom] = useState<string | null>(null);
   const [recentOpen, setRecentOpen] = useState(false);
   const [recentCommits, setRecentCommits] = useState<CommitItem[]>([]);
@@ -1235,6 +1237,7 @@ async function rebaseDraft() {
           setModalProject("create");
         }}
         onEditProject={() => setModalProject("edit")}
+        onManageVersions={() => setVerMgrOpen(true)}
         onNewRoot={() => startNodeDraft(null)}
         onFit={() => setFitSignal((n) => n + 1)}
         onManualRefresh={() => {
@@ -1364,6 +1367,7 @@ async function rebaseDraft() {
             versions={versions}
             versionId={versionId}
             onSetVersionId={setVersionId}
+            onManageVersions={() => setVerMgrOpen(true)}
           />
         </div>
 
@@ -1508,6 +1512,14 @@ async function rebaseDraft() {
       )}
       {aiAccessOpen && project && (
         <AiAccessModal project={project} pid={pid} onClose={() => setAiAccessOpen(false)} onToast={ironToast} />
+      )}
+      {verMgrOpen && (
+        <VersionManagerModal
+          versions={versions}
+          onClose={() => setVerMgrOpen(false)}
+          onCommit={commit}
+          onToast={ironToast}
+        />
       )}
     </div>
   );
@@ -1706,6 +1718,211 @@ function AiAccessModal({
         </button>
         <button className="primary" onClick={onClose}>
           {t("common.close")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** 38: 科研版本管理（创建/重命名/排序/归档）。全部操作走 Workspace 的统一
+ *  commit 通道（幂等/409/历史同步继承）；排序用 version.update fields.after_id
+ *  （null=置顶，UUID=移到其后，与 version.create 同语义）。已归档版本不可修改
+ *  （服务端 VERSION_ARCHIVED），也没有取消归档——如实用 hint 说明。 */
+function VersionManagerModal({
+  versions,
+  onClose,
+  onCommit,
+  onToast,
+}: {
+  versions: ResearchVersion[];
+  onClose: () => void;
+  onCommit: (ops: CommitOp[], summary: string) => Promise<CommitResponse | null>;
+  onToast: (msg: string, kind?: "ok" | "err") => void;
+}) {
+  const t = useT();
+  const [name, setName] = useState("");
+  const [desc, setDesc] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [archiveId, setArchiveId] = useState<string | null>(null);
+  const [archiveReason, setArchiveReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function run(ops: CommitOp[], summary: string): Promise<boolean> {
+    if (busy) return false;
+    setBusy(true);
+    const res = await onCommit(ops, summary);
+    setBusy(false);
+    if (res) {
+      setEditId(null);
+      setArchiveId(null);
+      setArchiveReason("");
+      return true;
+    }
+    onToast(t("ver.manage.err"), "err");
+    return false;
+  }
+
+  const validNew = name.trim().length >= 1 && name.trim().length <= 80;
+
+  return (
+    <Modal title={t("ver.manage")} onClose={onClose}>
+      <p className="muted" title={t("ver.manage.title")}>{t("ver.manage.title")}</p>
+      {versions.length === 0 && <p className="muted">{t("ver.manage.none")}</p>}
+      <div className="vermgr-list" data-testid="vermgr-list">
+        {versions.map((v, i) =>
+          editId === v.id ? (
+            <div key={v.id} className="vermgr-row" data-testid="vermgr-edit-row">
+              <input
+                value={editName}
+                maxLength={80}
+                data-testid="vermgr-edit-name"
+                onChange={(e) => setEditName(e.target.value)}
+              />
+              <input
+                value={editDesc}
+                maxLength={500}
+                placeholder={t("ver.manage.desc.ph")}
+                data-testid="vermgr-edit-desc"
+                onChange={(e) => setEditDesc(e.target.value)}
+              />
+              <div className="mrow">
+                <button onClick={() => setEditId(null)} disabled={busy}>{t("common.cancel")}</button>
+                <button
+                  className="primary"
+                  data-testid={`vermgr-save-${v.id.slice(0, 8)}`}
+                  disabled={busy || editName.trim().length === 0 || (editName.trim() === v.name && editDesc === v.description)}
+                  onClick={() =>
+                    void run(
+                      [{
+                        op: "version.update",
+                        id: v.id,
+                        fields: {
+                          ...(editName.trim() !== v.name ? { name: editName.trim() } : {}),
+                          ...(editDesc !== v.description ? { description: editDesc } : {}),
+                        },
+                      }],
+                      t("ws.summary.version.update", { name: v.name }),
+                    )
+                  }
+                >
+                  {t("ver.manage.save")}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div key={v.id} className="vermgr-row" data-testid={`vermgr-row-${v.id.slice(0, 8)}`}>
+              <div className="vermgr-head">
+                <b>{v.name}</b>
+                {v.archived && <span className="chip-dim">{t("ver.archived")}</span>}
+              </div>
+              {v.description && <div className="muted">{v.description}</div>}
+              <div className="mrow">
+                <button
+                  data-testid={`vermgr-rename-${v.id.slice(0, 8)}`}
+                  disabled={busy || v.archived}
+                  onClick={() => { setEditId(v.id); setEditName(v.name); setEditDesc(v.description); }}
+                >
+                  {t("ver.manage.rename")}
+                </button>
+                <button
+                  data-testid={`vermgr-up-${v.id.slice(0, 8)}`}
+                  disabled={busy || v.archived || i === 0}
+                  onClick={() =>
+                    void run(
+                      [{ op: "version.update", id: v.id, fields: { after_id: i >= 2 ? versions[i - 2].id : null } }],
+                      t("ws.summary.version.update", { name: v.name }),
+                    )
+                  }
+                >
+                  {t("ver.manage.move.up")}
+                </button>
+                <button
+                  data-testid={`vermgr-down-${v.id.slice(0, 8)}`}
+                  disabled={busy || v.archived || i === versions.length - 1}
+                  onClick={() =>
+                    void run(
+                      [{ op: "version.update", id: v.id, fields: { after_id: versions[i + 1].id } }],
+                      t("ws.summary.version.update", { name: v.name }),
+                    )
+                  }
+                >
+                  {t("ver.manage.move.down")}
+                </button>
+                {!v.archived && (
+                  <>
+                    <button
+                      data-testid={`vermgr-archive-${v.id.slice(0, 8)}`}
+                      disabled={busy}
+                      onClick={() => { setArchiveId(v.id); setArchiveReason(""); }}
+                    >
+                      {t("ver.manage.archive")}
+                    </button>
+                  </>
+                )}
+              </div>
+              {archiveId === v.id && (
+                <div className="vermgr-archive" data-testid="vermgr-archive-box">
+                  <input
+                    value={archiveReason}
+                    maxLength={500}
+                    placeholder={t("ver.manage.archive.reason.ph")}
+                    data-testid="vermgr-archive-reason"
+                    onChange={(e) => setArchiveReason(e.target.value)}
+                  />
+                  <div className="mrow">
+                    <button onClick={() => setArchiveId(null)} disabled={busy}>{t("common.cancel")}</button>
+                    <button
+                      className="primary"
+                      data-testid="vermgr-archive-confirm"
+                      disabled={busy || archiveReason.trim().length === 0}
+                      onClick={() =>
+                        void run(
+                          [{ op: "version.archive", id: v.id, reason: archiveReason.trim() }],
+                          t("ws.summary.version.archive", { name: v.name }),
+                        )
+                      }
+                    >
+                      {t("ver.manage.archive.confirm")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ),
+        )}
+      </div>
+      <hr />
+      <label className="field">{t("ver.manage.name.ph")}</label>
+      <input
+        value={name}
+        maxLength={80}
+        style={{ width: "100%" }}
+        data-testid="vermgr-create-name"
+        onChange={(e) => setName(e.target.value)}
+      />
+      <label className="field">{t("ver.manage.desc.ph")}</label>
+      <input
+        value={desc}
+        maxLength={500}
+        style={{ width: "100%" }}
+        data-testid="vermgr-create-desc"
+        onChange={(e) => setDesc(e.target.value)}
+      />
+      <p className="muted">{t("ver.manage.archived.hint")}</p>
+      <div className="mrow">
+        <button onClick={onClose} disabled={busy}>{t("common.close")}</button>
+        <button
+          className="primary"
+          data-testid="vermgr-create-btn"
+          disabled={busy || !validNew}
+          onClick={() => void run(
+            [{ op: "version.create", id: uuidv4(), name: name.trim(), description: desc.trim() }],
+            t("ws.summary.version.create", { name: name.trim() }),
+          ).then((ok) => { if (ok) { setName(""); setDesc(""); } })}
+        >
+          {busy ? t("ver.manage.creating") : t("ver.manage.create")}
         </button>
       </div>
     </Modal>

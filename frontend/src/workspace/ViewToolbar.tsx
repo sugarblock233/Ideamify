@@ -45,6 +45,8 @@ export interface ViewToolbarProps {
   versions: ResearchVersion[];
   versionId: string | null;
   onSetVersionId: (id: string | null) => void;
+  /** 38: 打开科研版本管理弹窗（行内常驻，空版本列表也可达） */
+  onManageVersions: () => void;
 }
 
 const DENSITY_ORDER: DensityMode[] = ["reading", "compact", "overview", "auto"];
@@ -200,35 +202,47 @@ export default function ViewToolbar(p: ViewToolbarProps) {
               {p.lowInterference ? t("b1.low.off") : t("b1.low.on")}
             </div>
             {/* E 批 §7：版本筛选 — 全部/未分配/各版本。已归档版本仍可选带标记
-                （其归属节点要能浏览）；筛选与折叠/分支互不覆写。 */}
-            {p.versions.length > 0 && (
-              <div className="pop-item dotmenu-line" data-testid="vt-version" role="radiogroup" title={t("vt.version.title")}>
-                <button
-                  className={p.versionId === null ? "seg on" : "seg"}
-                  data-testid="vt-version-all"
-                  onClick={() => { p.onSetVersionId(null); }}
-                >
-                  {t("vt.version.all")}
-                </button>
-                <button
-                  className={p.versionId === VERSION_FILTER_UNASSIGNED ? "seg on" : "seg"}
-                  data-testid="vt-version-unassigned"
-                  onClick={() => { p.onSetVersionId(VERSION_FILTER_UNASSIGNED); }}
-                >
-                  {t("vt.version.unassigned")}
-                </button>
-                {p.versions.map((v) => (
+                （其归属节点要能浏览）；筛选与折叠/分支互不覆写。
+                38：行内常驻「管理」入口（科研版本创建/重命名/排序/归档），
+                无版本时也渲染——否则新项目永远没有 UI 入口。 */}
+            <div className="pop-item dotmenu-line" data-testid="vt-version" role="radiogroup" title={t("vt.version.title")}>
+              {p.versions.length > 0 && (
+                <>
                   <button
-                    key={v.id}
-                    className={p.versionId === v.id ? "seg on" : "seg"}
-                    data-testid={`vt-version-${v.id.slice(0, 8)}`}
-                    onClick={() => { p.onSetVersionId(v.id); }}
+                    className={p.versionId === null ? "seg on" : "seg"}
+                    data-testid="vt-version-all"
+                    onClick={() => { p.onSetVersionId(null); }}
                   >
-                    {v.archived ? `${v.name}·${t("ver.archived")}` : v.name}
+                    {t("vt.version.all")}
                   </button>
-                ))}
-              </div>
-            )}
+                  <button
+                    className={p.versionId === VERSION_FILTER_UNASSIGNED ? "seg on" : "seg"}
+                    data-testid="vt-version-unassigned"
+                    onClick={() => { p.onSetVersionId(VERSION_FILTER_UNASSIGNED); }}
+                  >
+                    {t("vt.version.unassigned")}
+                  </button>
+                  {p.versions.map((v) => (
+                    <button
+                      key={v.id}
+                      className={p.versionId === v.id ? "seg on" : "seg"}
+                      data-testid={`vt-version-${v.id.slice(0, 8)}`}
+                      onClick={() => { p.onSetVersionId(v.id); }}
+                    >
+                      {v.archived ? `${v.name}·${t("ver.archived")}` : v.name}
+                    </button>
+                  ))}
+                </>
+              )}
+              <button
+                className="seg"
+                data-testid="vt-version-manage"
+                title={t("ver.manage.title")}
+                onClick={() => { p.onManageVersions(); }}
+              >
+                {t("ver.manage")}
+              </button>
+            </div>
           </div>
         )}
       </div>

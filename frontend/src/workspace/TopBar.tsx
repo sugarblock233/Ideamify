@@ -44,6 +44,8 @@ export interface TopBarProps {
   onSwitchProject: (pid: string) => void;
   onCreateProject: () => void;
   onEditProject: () => void;
+  /** 38: 科研版本管理（⋯ 菜单入口，空项目也可达） */
+  onManageVersions: () => void;
   onNewRoot: () => void;
   onFit: () => void;
   onManualRefresh: () => void;
@@ -281,6 +283,9 @@ export default function TopBar(p: TopBarProps) {
                 {t("topbar.menu.project.settings")}
               </div>
             )}
+            <div className="pop-item" data-testid="topbar-versions" onClick={() => { setMenuOpen(false); p.onManageVersions(); }}>
+              {t("ver.manage")}
+            </div>
             <div className="pop-item" onClick={() => { setMenuOpen(false); p.onFit(); }}>
               {t("topbar.menu.fit")}
             </div>
@@ -305,7 +310,7 @@ export default function TopBar(p: TopBarProps) {
                       setMenuOpen(false);
                     }}
                   >
-                    <b>v{c.revision}</b> · {c.summary}
+                    <b>{t("topbar.recent.rev", { n: c.revision })}</b> · {c.summary}
                     <div className="muted">{fmtTime(c.created_at)} · {c.actor}</div>
                   </div>
                 ))}

@@ -38,7 +38,7 @@ describe("t()", () => {
   });
 
   it("interpolates named params", () => {
-    expect(t("empty.enter.btn", { name: "锂电", rev: 3 })).toBe("进入「锂电」（v3）");
+    expect(t("empty.enter.btn", { name: "锂电", rev: 3 })).toBe("进入「锂电」（记录 #3）");
   });
 
   it("falls back to the key itself for unknown keys", () => {

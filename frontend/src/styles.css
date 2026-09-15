@@ -413,6 +413,22 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
 .modal h3 { margin: 0 0 10px; font-size: 15px; }
 .modal .mrow { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 
+/* 38: 科研版本管理弹窗 */
+.vermgr-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.vermgr-row {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.vermgr-row > .mrow { margin-top: 2px; justify-content: flex-start; }
+.vermgr-head { display: flex; align-items: center; gap: 8px; }
+.chip-dim {
+  font-size: 11px; color: var(--ink-dim); border: 1px solid var(--line);
+  border-radius: 999px; padding: 0 8px;
+}
+.vermgr-row input { width: 100%; }
+.vermgr-archive { border-top: 1px dashed var(--line); padding-top: 6px; }
+.modal hr { border: none; border-top: 1px solid var(--line); margin: 14px 0 4px; }
+
 /* token gate */
 .gate {
   height: 100%; display: flex; align-items: center; justify-content: center;

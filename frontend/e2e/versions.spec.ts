@@ -233,3 +233,50 @@ test("F04: 共享节点每条命中泳道各一个显示实例；筛选 v2 落 v
   const bBox = await card(page, "版本B").boundingBox();
   expect(Math.abs(dBox!.x - bBox!.x)).toBeLessThan(10); // 与 v2 独占节点同列
 });
+
+test("版本管理：创建/重命名/上移/归档走 UI 闭环；记录号文案统一「记录 #N」", async ({ page }) => {
+  const f = await seedVersions(page);
+  await enterStudio(page, f.pid);
+  await expect(card(page, "版本C")).toBeVisible({ timeout: 20_000 });
+
+  // 文案收尾 38：根卡与顶栏不再把记录号标成 vN；应用版本单独标注
+  await expect(page.locator(".rm-root")).toContainText("记录 #");
+  const conn = page.locator(".topbar .conn");
+  await expect(conn).toContainText("项目记录 #");
+  await expect(conn).toContainText("应用版本 v");
+
+  await openMenu(page);
+  await page.getByTestId("vt-version-manage").click();
+  const list = page.getByTestId("vermgr-list");
+  await expect(list.getByTestId(`vermgr-row-${f.va.slice(0, 8)}`)).toBeVisible();
+
+  // 上移「第二轮」→ 置顶（version.update fields.after_id=null）
+  await page.getByTestId(`vermgr-up-${f.vb.slice(0, 8)}`).click();
+  await expect(list.locator(".vermgr-row").first()).toContainText("第二轮");
+
+  // 重命名（version.update fields.name）
+  await page.getByTestId(`vermgr-rename-${f.vb.slice(0, 8)}`).click();
+  await page.getByTestId("vermgr-edit-name").fill("第二轮改");
+  await page.getByTestId(`vermgr-save-${f.vb.slice(0, 8)}`).click();
+  await expect(list.getByTestId(`vermgr-row-${f.vb.slice(0, 8)}`)).toContainText("第二轮改");
+
+  // 归档（version.archive，需一句原因；归档后不可再改）
+  await page.getByTestId(`vermgr-archive-${f.vb.slice(0, 8)}`).click();
+  await page.getByTestId("vermgr-archive-reason").fill("E2E 归档该轮");
+  await page.getByTestId("vermgr-archive-confirm").click();
+  await expect(list.getByTestId(`vermgr-row-${f.vb.slice(0, 8)}`)).toContainText("已归档");
+  await expect(page.getByTestId(`vermgr-rename-${f.vb.slice(0, 8)}`)).toBeDisabled();
+
+  await page.getByRole("button", { name: "关闭" }).click();
+  // 筛选行同步：重命名的版本带已归档标记（历史归属仍可筛选浏览）
+  await openMenu(page);
+  await expect(page.getByTestId(`vt-version-${f.vb.slice(0, 8)}`)).toContainText("第二轮改·已归档");
+
+  // UI 新建科研版本
+  await page.getByTestId("vt-version-manage").click();
+  await page.getByTestId("vermgr-create-name").fill("E2E 第三轮");
+  await page.getByTestId("vermgr-create-btn").click();
+  const c3 = list.locator(".vermgr-row", { hasText: "E2E 第三轮" });
+  await expect(c3).toBeVisible();
+  await page.getByRole("button", { name: "关闭" }).click();
+});
