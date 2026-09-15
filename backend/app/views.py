@@ -282,6 +282,15 @@ def get_graph(pid: str, include_archived: bool = False) -> dict:
 # nodes
 # ---------------------------------------------------------------------------
 
+@router.get("/projects/{pid}/versions")
+def list_versions(pid: str) -> dict:
+    """科研版本标签列表（E 批 §7；只呈现，不做时间旅行）。"""
+    with read_session() as s:
+        p = _get_project_row(s, pid)
+        return {"project_revision": p.revision,
+                "versions": _version_records(_version_rows(s, pid))}
+
+
 @router.get("/projects/{pid}/nodes/{nid}")
 def get_node(pid: str, nid: str) -> dict:
     with read_session() as s:

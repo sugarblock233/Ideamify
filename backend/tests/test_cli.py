@@ -247,3 +247,32 @@ def test_attachments_lists_metadata_readonly(server, project):
     r2 = run_cli(server, "attachments", project, "--limit", "1")
     assert r2.returncode == 0, r2.stderr
     assert len(json.loads(r2.stdout)["items"]) <= 1
+
+
+def test_versions_lists_research_version_labels(server, project, tmp_path):
+    """E 批：versions 子命令读取科研版本阶段标签（与保存 revision 无关）。"""
+    v1, v2, nid = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+    ops = tmp_path / "versions.json"
+    ops.write_text(json.dumps({
+        "summary": "E 批：科研版本",
+        "operations": [
+            {"op": "version.create", "id": v1, "name": "第一轮", "description": "初始探索"},
+            {"op": "version.create", "id": v2, "name": "第二轮"},
+            {"op": "node.create", "id": nid, "kind": "idea", "title": "带版本节点",
+             "summary": "s", "version_ids": [v1]},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    r = run_cli(server, "commit", project, str(ops))
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["created_version_ids"] == [v1, v2]
+
+    r = run_cli(server, "versions", project)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)                    # stdout stays one JSON object
+    assert [v["name"] for v in out["versions"]] == ["第一轮", "第二轮"]
+    assert out["versions"][0]["id"] == v1
+
+    # --text 人读列表
+    r2 = run_cli(server, "versions", project, "--text")
+    assert r2.returncode == 0, r2.stderr
+    assert "第一轮" in r2.stdout and "v1" in r2.stdout and "第二轮" in r2.stdout

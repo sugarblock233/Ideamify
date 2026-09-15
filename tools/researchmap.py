@@ -416,6 +416,25 @@ def cmd_graph(args):
         emit(g)
 
 
+def cmd_versions(args):
+    """E 批：科研版本列表（v1/v2/v3 阶段标签；与保存 revision 无关，只读）。"""
+    client = make_client(args)
+    status, body = call_api(
+        client, "GET", f"/api/v1/projects/{args.project_id}/versions")
+    if not (200 <= status < 300):
+        respond(status, body)
+        return
+    if args.text:
+        print(f"project_revision={body.get('project_revision')}"
+              f"  versions={len(body.get('versions', []))}")
+        for v in body.get("versions", []):
+            mark = "（已归档）" if v.get("archived") else ""
+            print(f"  v{v['order_index'] + 1:<3} {v['name'][:60]:<60}{mark}")
+            print(f"    id={v['id']}")
+    else:
+        emit(body)
+
+
 def cmd_node(args):
     emit(get_or_die(make_client(args),
                     f"/api/v1/projects/{args.project_id}/nodes/{args.node_id}"))
@@ -722,6 +741,12 @@ def main(argv=None):
                    help="（兼容保留；JSON 已是默认输出）")
     s.add_argument("--text", action="store_true", help="人读列表输出")
     s.set_defaults(fn=cmd_graph)
+
+    s = sub.add_parser("versions", help="科研版本列表（阶段标签；与保存 revision 无关，只读）")
+    common_args(s)
+    s.add_argument("project_id")
+    s.add_argument("--text", action="store_true", help="人读列表输出")
+    s.set_defaults(fn=cmd_versions)
 
     s = sub.add_parser("node", help="节点完整内容（全量字段，定点补读）")
     common_args(s)
