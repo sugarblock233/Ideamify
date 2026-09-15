@@ -441,4 +441,5 @@ export const en: Record<keyof typeof zh, string> = {
   "vt.version.title": "Filter by research version (switching layouts keeps the filter)",
   "vt.version.all": "All versions",
   "vt.version.unassigned": "Unassigned",
+  "layout.swimlane": "Swimlanes",
 };

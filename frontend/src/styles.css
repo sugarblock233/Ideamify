@@ -472,6 +472,17 @@ button.chip.ver-chip.on {
   color: #fff; background: var(--sel); border-color: var(--sel);
 }
 
+/* E5: swimlane lane headers — screen-space overlay, never scaled with zoom */
+.swim-headers { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.swim-col, .swim-row {
+  position: absolute; display: inline-block; max-width: 200px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px; font-weight: 600; color: var(--ink-dim);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 2px 8px;
+}
+.swim-row { border-left: 3px solid var(--sel); }
+
 /* B01: read-first detail view */
 .readview { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .readsec-label { font-size: 11px; color: var(--ink-dim); margin-bottom: 2px; }

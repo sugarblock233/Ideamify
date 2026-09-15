@@ -13,7 +13,7 @@
  * storage-format migration here can never touch server data.
  */
 
-export type LayoutMode = "h" | "v" | "outline";
+export type LayoutMode = "h" | "v" | "outline" | "swimlane";
 export type DensityMode = "auto" | "reading" | "compact" | "overview";
 
 export interface Viewport {
@@ -85,7 +85,7 @@ function parseSavedStore(raw: unknown): SavedStore {
   const o = raw as Record<string, unknown>;
   if (o.version === 2 && typeof o.layouts === "object" && o.layouts !== null) {
     const layouts: SavedStore["layouts"] = {};
-    for (const m of ["h", "v", "outline"] as const) {
+    for (const m of ["h", "v", "outline", "swimlane"] as const) {
       const slot = (o.layouts as Record<string, unknown>)[m];
       if (slot !== undefined) layouts[m] = asLayoutView(slot);
     }
@@ -182,7 +182,7 @@ export interface ProjectViewPrefs {
   versionId: string | null;
 }
 
-const LAYOUTS: readonly LayoutMode[] = ["h", "v", "outline"];
+const LAYOUTS: readonly LayoutMode[] = ["h", "v", "outline", "swimlane"];
 const DENSITIES: readonly DensityMode[] = ["auto", "reading", "compact", "overview"];
 
 export function projectViewPrefsDefaults(): ProjectViewPrefs {

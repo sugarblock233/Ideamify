@@ -136,7 +136,8 @@ describe("project view prefs", () => {
   });
 
   it("rejects unknown enum values from storage", () => {
-    localStorage.setItem(`rm.prefs.${PID}`, JSON.stringify({ layout: "swimlane", density: 3 }));
+    // E5: "swimlane" became a real mode — use a value that stays junk.
+    localStorage.setItem(`rm.prefs.${PID}`, JSON.stringify({ layout: "diagonal", density: 3 }));
     const p = loadProjectViewPrefs(PID);
     expect(p.layout).toBe("h");
     expect(p.density).toBe("auto");

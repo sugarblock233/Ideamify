@@ -25,17 +25,18 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import { computeLayout, draftPlacement, CARD_W, CARD_H, DRAFT_W, DRAFT_H, rootIdOf, type LayoutResult } from "../lib/layout";
+import { computeLayout, computeSwimlane, draftPlacement, CARD_W, CARD_H, DRAFT_W, DRAFT_H, rootIdOf, type LayoutResult } from "../lib/layout";
 import { STATUS_COLOR, STATUS_GLYPH } from "../lib/format";
 import { resolveTier, type DetailTier } from "../lib/detailLevel";
 import type { DensityMode, LayoutMode } from "../lib/viewPrefs";
-import type { GraphNode, NodeStatus, Project, RelationItem } from "../lib/types";
+import type { GraphNode, NodeStatus, Project, RelationItem, ResearchVersion } from "../lib/types";
 import { selectCanvasRelations } from "../lib/relations";
 import { NodeCard, type CardData } from "./NodeCard";
 import { RootCard, type RootData } from "./RootCard";
 import { DraftCard, type DraftData } from "./DraftCard";
 import type { Draft } from "./SidePanel";
 import OverviewLabels, { type OverviewLabelItem } from "./OverviewLabels";
+import SwimlaneHeaders from "./SwimlaneHeaders";
 import { RelationEdge, makeRelEdge } from "./RelationEdge";
 import { deepLinkHref } from "../lib/deeplink";
 import { useT } from "../lib/i18n";
@@ -83,8 +84,12 @@ export interface CanvasProps {
   density: DensityMode;
   lowInterference: boolean;
   /** B2: layout strategy ("h"/"v" here; "outline" renders its own list view
-   *  and is defensively mapped to "h" should it ever reach Canvas). */
+   *  and is defensively mapped to "h" should it ever reach Canvas).
+   *  E5: "swimlane" is the version × route grid (computeSwimlane). */
   mode: LayoutMode;
+  /** E5: research versions in display order — the swimlane columns; unused
+   *  by the tree modes. */
+  versions: ResearchVersion[];
   /** C3: the open node-create draft session (null when none). Canvas renders
    *  it as a dashed overlay card docked next to its parent plus a dashed temp
    *  edge; the card and the side panel edit the same session. */
@@ -136,10 +141,15 @@ function Inner(p: CanvasProps) {
     if (next !== tierRef.current) setTier(next);
   }, [p.density]);
 
-  // ---- layout (pure, deterministic) --------------------------------------
+  // ---- layout (pure, deterministic) ----------------------------------------
+  // E5: the swimlane ignores folds/branch (the grid IS the whole filtered
+  // population) and has no virtual root — tree edges are not drawn.
   const layout: LayoutResult = useMemo(
-    () => computeLayout(p.projectId, p.graph, p.folds, p.branchRoot, treeMode),
-    [p.projectId, p.graph, p.folds, p.branchRoot, treeMode],
+    () =>
+      p.mode === "swimlane"
+        ? computeSwimlane(p.projectId, p.graph, p.versions, t("ver.unassigned"))
+        : computeLayout(p.projectId, p.graph, p.folds, p.branchRoot, treeMode),
+    [p.projectId, p.graph, p.folds, p.branchRoot, treeMode, p.mode, p.versions, t],
   );
   // structKey must change for ANY structural change — including same-count
   // re-parenting / sibling reordering — so positions (not just their count)
@@ -333,16 +343,20 @@ function Inner(p: CanvasProps) {
   const edges = useMemo<Edge[]>(() => {
     const out: Edge[] = [];
     const rootId = rootIdOf(p.projectId);
-    for (const id of layout.positions.keys()) {
-      if (id === rootId) continue;
-      const gn = p.graph.find((g) => g.id === id);
-      if (!gn) continue;
-      // B03: top-level routes (and any visibly rooted card) connect to the
-      // virtual root — the root is never an isolated island.
-      if (gn.parent_id && layout.positions.has(gn.parent_id)) {
-        out.push({ id: `t:${id}`, source: gn.parent_id, target: id, type: "default" });
-      } else {
-        out.push({ id: `t:${id}`, source: rootId, target: id, type: "default" });
+    // E5: swimlane draws no main-tree edges (plan E5) — relations below still
+    // go through, so an assigned node's cross-references stay reachable.
+    if (p.mode !== "swimlane") {
+      for (const id of layout.positions.keys()) {
+        if (id === rootId) continue;
+        const gn = p.graph.find((g) => g.id === id);
+        if (!gn) continue;
+        // B03: top-level routes (and any visibly rooted card) connect to the
+        // virtual root — the root is never an isolated island.
+        if (gn.parent_id && layout.positions.has(gn.parent_id)) {
+          out.push({ id: `t:${id}`, source: gn.parent_id, target: id, type: "default" });
+        } else {
+          out.push({ id: `t:${id}`, source: rootId, target: id, type: "default" });
+        }
       }
     }
     if (p.selectedId && layout.visibleIds.has(p.selectedId)) {
@@ -385,7 +399,7 @@ function Inner(p: CanvasProps) {
       }
     }
     return out;
-  }, [layout, p.graph, p.selectedId, p.selectedRelationId, p.relations, hoveredRel, p.onPickRelation, p.projectId, shownRels, p.lowInterference, p.nodeDraft, nodes]);
+  }, [layout, p.graph, p.selectedId, p.selectedRelationId, p.relations, hoveredRel, p.onPickRelation, p.projectId, shownRels, p.lowInterference, p.nodeDraft, p.mode, nodes]);
 
   // ---- viewport stability --------------------------------------------------
   useEffect(() => {
@@ -465,6 +479,12 @@ function Inner(p: CanvasProps) {
     const saved = loadLayoutView(p.projectId, p.mode).viewport;
     if (saved) {
       flow.setViewport(saved, { duration: 0 });
+      return;
+    }
+    // E5: the swimlane is a bounded grid — fit it, rather than anchoring on a
+    // root card that this mode does not draw.
+    if (p.mode === "swimlane") {
+      flow.fitView({ padding: 0.1, duration: 0 });
       return;
     }
     const anchorId = p.branchRoot ?? rootIdOf(p.projectId);
@@ -564,7 +584,7 @@ function Inner(p: CanvasProps) {
         <MiniMap
           pannable
           zoomable
-          style={treeMode === "v" ? { width: 150, height: 120 } : { width: 120, height: 150 }}
+          style={treeMode === "v" || p.mode === "swimlane" ? { width: 150, height: 120 } : { width: 120, height: 150 }}
           maskColor="rgba(29,36,48,0.12)"
           maskStrokeColor="#5c6675"
           maskStrokeWidth={2}
@@ -629,6 +649,10 @@ function Inner(p: CanvasProps) {
       {tier === "overview" && (
         <OverviewLabels items={ovItems} selected={ovSelected} onZoomIn={onZoomToNode} />
       )}
+
+      {/* E5: lane headers are the swimlane's only orientation layer, so they
+          render at every density tier while this mode is up. */}
+      {p.mode === "swimlane" && layout.swimlane && <SwimlaneHeaders grid={layout.swimlane} />}
 
       {ctxMenu && (
         <CtxMenu

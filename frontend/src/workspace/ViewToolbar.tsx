@@ -48,7 +48,7 @@ export interface ViewToolbarProps {
 }
 
 const DENSITY_ORDER: DensityMode[] = ["reading", "compact", "overview", "auto"];
-const LAYOUTS: LayoutMode[] = ["h", "v", "outline"];
+const LAYOUTS: LayoutMode[] = ["h", "v", "outline", "swimlane"];
 
 export default function ViewToolbar(p: ViewToolbarProps) {
   const t = useT();

@@ -16,8 +16,9 @@ size and the mapping differ.
 */
 
 import { hierarchy, tree, type HierarchyNode, type HierarchyPointNode } from "d3-hierarchy";
-import type { GraphNode } from "./types";
+import type { GraphNode, ResearchVersion } from "./types";
 import type { LayoutMode } from "./viewPrefs";
+import { VERSION_FILTER_UNASSIGNED } from "./versionFilter";
 
 export type { LayoutMode } from "./viewPrefs";
 
@@ -61,6 +62,8 @@ export interface LayoutResult {
   rootId: string;
   /** ids of visible (non-root) nodes */
   visibleIds: Set<string>;
+  /** E5: lane geometry, set only when computeSwimlane produced this result. */
+  swimlane?: SwimlaneGrid;
 }
 
 interface TreeLeaf {
@@ -223,6 +226,145 @@ export function computeLayout(
   walk(hRoot);
 
   return { positions, rootId, visibleIds };
+}
+
+/* --------------------------- E5: version × route swimlanes ------------------ */
+
+/** Lane geometry (plan E5): cards keep their canvas size everywhere.
+ *  「行内步进 160」 = CARD_H + 16 within a cell; the rest are the same air
+ *  ratios the tree layouts use. */
+export const SWIM_COL_GAP = 96;
+export const SWIM_ROW_GAP = 56;
+export const SWIM_CELL_STEP = 160;
+export const SWIM_HEADER_GAP = 48;
+
+/** Screen-space lane headers (SwimlaneHeaders projects these like the
+ *  overview layer does — canvas px + transform = screen px). */
+export interface SwimlaneGrid {
+  /** column headers left-to-right; label is the version name, the pseudo
+   *  「未分配」 column sits at the END (plan E5). key is version id or the
+   *  VERSION_FILTER_UNASSIGNED sentinel. */
+  cols: { key: string; label: string; x: number }[];
+  /** row headers top-to-bottom — one per top-level route. */
+  rows: { id: string; title: string; y: number; height: number }[];
+  /** grid bounds in canvas px (minX is the first column's left edge). */
+  minX: number;
+  minY: number;
+}
+
+/** E5: version × route swimlane layout. Rows are top-level routes (parent_id
+ *  null) sorted (order_index, id); columns are research versions sorted
+ *  (order_index, id) plus the 「未分配」 pseudo-column at the end. Every node
+ *  lands in its route's row and its FIRST known assigned version's column
+ *  (multi-version sharing displays the first lane today — DECISIONS §19);
+ *  nodes within a cell stack deterministically by (order_index, id) in
+ *  SWIM_CELL_STEP steps. Tree edges are not drawn in this mode (plan E5);
+ *  fold/branch state is deliberately ignored — the swimlane is the whole
+ *  filtered population on one grid. Same (nodes, versions, order) ⇒ same
+ *  coordinates. */
+export function computeSwimlane(
+  projectId: string,
+  nodes: GraphNode[],
+  versions: ResearchVersion[],
+  unassignedLabel: string,
+): LayoutResult {
+  const rootId = rootIdOf(projectId);
+  const empty: LayoutResult = { positions: new Map(), rootId, visibleIds: new Set() };
+  if (nodes.length === 0) return empty;
+
+  // Columns: versions in display order, 「未分配」 pseudo-column last.
+  const cols = [...versions]
+    .sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id))
+    .map((v) => ({ key: v.id, label: v.name }));
+  cols.push({ key: VERSION_FILTER_UNASSIGNED, label: unassignedLabel });
+  const colIndex = new Map<string, number>();
+  cols.forEach((c, i) => colIndex.set(c.key, i));
+
+  // Rows: top-level routes of the (already filtered) node set. A node whose
+  // ancestor chain is broken by the filter/archived hides anchors at the
+  // highest node still present — it becomes its own row.
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const routeOf = (n: GraphNode): GraphNode => {
+    let cur = n;
+    const seen = new Set<string>([n.id]);
+    while (cur.parent_id && !seen.has(cur.parent_id) && byId.has(cur.parent_id)) {
+      seen.add(cur.parent_id);
+      cur = byId.get(cur.parent_id)!;
+    }
+    return cur;
+  };
+  const rows = [...nodes.filter((n) => n.parent_id === null || !byId.has(n.parent_id))]
+    .map((n) => routeOf(n))
+    .filter((n, i, arr) => arr.findIndex((m) => m.id === n.id) === i)
+    .sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id));
+  const rowIndex = new Map<string, number>();
+  rows.forEach((r, i) => rowIndex.set(r.id, i));
+
+  // Deterministic stack order: global (order_index, id) fill. Two passes —
+  // first decide every card's (row, col, slot), then lay out row bands with
+  // the cumulative height of their own stack so tall lanes never bleed into
+  // the next row.
+  const ordered = [...nodes].sort(
+    (a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id),
+  );
+  const slots = new Map<string, number>(); // `${rowIdx}:${colIdx}` → next card no
+
+  const placed: { id: string; rIdx: number; cIdx: number; s: number }[] = [];
+  const stack = new Map<number, number>(); // rowIdx → max cards in the row
+  for (const n of ordered) {
+    const r = routeOf(n);
+    const rIdx = rowIndex.get(r.id);
+    if (rIdx === undefined) continue;
+    const vids = n.version_ids ?? [];
+    let cIdx = -1;
+    for (const v of vids) {
+      const hit = colIndex.get(v);
+      if (hit !== undefined) {
+        cIdx = hit;
+        break;
+      }
+    }
+    if (cIdx < 0) cIdx = colIndex.get(VERSION_FILTER_UNASSIGNED)!;
+    const cellKey = `${rIdx}:${cIdx}`;
+    const s = slots.get(cellKey) ?? 0;
+    slots.set(cellKey, s + 1);
+    placed.push({ id: n.id, rIdx, cIdx, s });
+    stack.set(rIdx, Math.max(stack.get(rIdx) ?? 0, s + 1));
+  }
+
+  const positions = new Map<string, PlacedNode>();
+  const visibleIds = new Set<string>();
+  const rowTop = new Map<number, number>();
+  let acc = SWIM_HEADER_GAP;
+  for (let i = 0; i < rows.length; i++) {
+    rowTop.set(i, acc);
+    acc += (stack.get(i) ?? 1) * SWIM_CELL_STEP + SWIM_ROW_GAP;
+  }
+  for (const p of placed) {
+    positions.set(p.id, {
+      id: p.id,
+      x: p.cIdx * (CARD_W + SWIM_COL_GAP),
+      y: rowTop.get(p.rIdx)! + p.s * SWIM_CELL_STEP,
+      width: CARD_W,
+      height: CARD_H,
+      hiddenCount: 0,
+      depth: (byId.get(p.id)?.parent_id ?? null) === null ? 1 : 2,
+    });
+    visibleIds.add(p.id);
+  }
+
+  const grid: SwimlaneGrid = {
+    cols: cols.map((c, i) => ({ key: c.key, label: c.label, x: i * (CARD_W + SWIM_COL_GAP) })),
+    rows: rows.map((r, i) => ({
+      id: r.id,
+      title: r.title,
+      y: rowTop.get(i) ?? SWIM_HEADER_GAP,
+      height: (stack.get(i) ?? 1) * SWIM_CELL_STEP,
+    })),
+    minX: 0,
+    minY: 0,
+  };
+  return { positions, rootId, visibleIds, swimlane: grid };
 }
 
 /** Overlap predicate used by layout unit tests (T02 cards must not overlap). */

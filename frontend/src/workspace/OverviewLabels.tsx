@@ -33,9 +33,10 @@ export interface OverviewLabelItem {
 const LABEL_H = 18;
 const LABEL_GAP = 4;
 
-/** Transform-following shared by both label kinds. The store has no
- *  selector middleware — compare the tuple across ticks ourselves. */
-function useTransform(): [number, number, number] {
+/** Transform-following shared by both label kinds (and SwimlaneHeaders, E5).
+ *  The store has no selector middleware — compare the tuple across ticks
+ *  ourselves. */
+export function useTransform(): [number, number, number] {
   const store = useStoreApi();
   const [tf, setTf] = useState<[number, number, number]>(() => {
     const tr = store.getState().transform;

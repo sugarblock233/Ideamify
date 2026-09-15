@@ -1274,6 +1274,7 @@ async function rebaseDraft() {
             onClearSelection={clearSelection}
             onPickRelation={(id) => setSelectedRelationId(id)}
             onAddChild={(par) => startNodeDraft(par)}
+            versions={versions}
             marks={marks}
             pendingLocate={pendingLocate}
             onLocated={() => setPendingLocate(null)}

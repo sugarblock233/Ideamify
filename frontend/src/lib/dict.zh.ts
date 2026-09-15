@@ -444,6 +444,7 @@ export const zh = {
   "vt.version.title": "按科研版本筛选（切换布局不清除筛选）",
   "vt.version.all": "全部版本",
   "vt.version.unassigned": "未分配",
+  "layout.swimlane": "泳道",
 } as const;
 
 export type DictKey = keyof typeof zh;
