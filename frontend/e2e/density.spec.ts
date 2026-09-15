@@ -102,7 +102,7 @@ test("密度锁直接透传；低干扰隐藏标签/计数且刷新后保留", a
   // 展开全部后锁概览：立即换档（无视 zoom）。
   // 菜单内的 lock/分段/低干扰点击均不收起菜单，一次打开连点到结束。
   await page.getByTestId("vt-expand-all").click();
-  const openMenu = () => page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+  const openMenu = () => page.getByTestId("vt-menu").click();
   await openMenu();
 
   await page.getByTestId("vt-density-overview").click();
@@ -119,7 +119,7 @@ test("密度锁直接透传；低干扰隐藏标签/计数且刷新后保留", a
 
   // 低干扰：row3（计数/标签）隐藏、图例出现（图例在外部点击后会收菜单，
   // 所以低干扰单独开一次菜单）
-  const openMenu2 = () => page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+  const openMenu2 = () => page.getByTestId("vt-menu").click();
   await openMenu2();
   await page.getByTestId("vt-low-interf").click();
   await page.mouse.click(10, 300);

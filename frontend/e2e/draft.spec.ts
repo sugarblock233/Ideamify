@@ -170,7 +170,7 @@ test("切换布局草稿存活：侧栏表单、画布卡、大纲只读行同�
   // 用它判定菜单开合，避免「点关已开的菜单」
   const openMenu = async () => {
     if (!(await page.getByTestId("vt-layout").isVisible().catch(() => false))) {
-      await page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+      await page.getByTestId("vt-menu").click();
     }
     await expect(page.getByTestId("vt-layout")).toBeVisible();
   };
@@ -329,7 +329,7 @@ test("F03: 保存成功但回执丢失——重放冻结请求收束，冻结期
 });
 
 async function openViewMenu(page: Page) {
-  await page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+  await page.getByTestId("vt-menu").click();
 }
 
 test("F05: 空项目新建一级——草稿卡直接出现在画布上，可编辑可保存", async ({ page }) => {

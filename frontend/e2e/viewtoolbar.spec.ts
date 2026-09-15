@@ -45,7 +45,7 @@ async function seedChain(page: Page, depth: number): Promise<{ pid: string; a: s
 const card = (page: Page, text: string) => page.locator(".rm-card", { hasText: text });
 
 async function openMenu(page: Page) {
-  await page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+  await page.getByTestId("vt-menu").click();
 }
 
 test("首开 2 卡 → 全部展开 5 卡（带计数）→ 第 1/3 层 → 全部折叠 → 恢复上次往返", async ({ page }) => {

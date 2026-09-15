@@ -74,81 +74,95 @@ export default function ViewToolbar(p: ViewToolbarProps) {
 
   if (p.nodes.length === 0) return null;
 
+  /** F07: every one of these tools writes the fold set (or needs it for the
+   *  count) — on the swimlane grid the folds are ignored, so the buttons
+   *  would be clickable no-ops. Layout/density/低干扰/版本筛选 stay. */
+  const treeTools = p.layout !== "swimlane";
+
   const ctx = { nodes: p.nodes, branchRoot: p.branchRoot };
 
   return (
     <div className="vtool" data-testid="view-toolbar">
-      <button
-        data-testid="vt-expand-all"
-        title={t("a6.expand.all.title", { n: visibleN })}
-        onClick={() => p.onReplaceFolds(new Set())}
-      >
-        {t("a6.expand.all", { n: visibleN })}
-      </button>
-      <button
-        data-testid="vt-collapse-all"
-        title={t("a6.collapse.all.title")}
-        onClick={() => p.onReplaceFolds(collapseAllFolds(ctx))}
-      >
-        {t("a6.collapse.all")}
-      </button>
+      {treeTools && (
+        <>
+          <button
+            data-testid="vt-expand-all"
+            title={t("a6.expand.all.title", { n: visibleN })}
+            onClick={() => p.onReplaceFolds(new Set())}
+          >
+            {t("a6.expand.all", { n: visibleN })}
+          </button>
+          <button
+            data-testid="vt-collapse-all"
+            title={t("a6.collapse.all.title")}
+            onClick={() => p.onReplaceFolds(collapseAllFolds(ctx))}
+          >
+            {t("a6.collapse.all")}
+          </button>
+        </>
+      )}
       <div className="menu" ref={menuRef}>
         <button
           className={menuOpen ? "vt-menu open" : "vt-menu"}
           title={t("a6.more.title")}
+          data-testid="vt-menu"
           onClick={() => setMenuOpen((v) => !v)}
         >
           ▾
         </button>
         {menuOpen && (
           <div className="pop" style={{ top: "100%", right: 0 }}>
-            <div
-              className="pop-item"
-              data-testid="vt-level-1"
-              onClick={() => { setMenuOpen(false); p.onReplaceFolds(expandToLevelFolds(ctx, 1)); }}
-            >
-              {t("a6.expand.level", { n: 1 })}
-            </div>
-            <div
-              className="pop-item"
-              data-testid="vt-level-2"
-              onClick={() => { setMenuOpen(false); p.onReplaceFolds(expandToLevelFolds(ctx, 2)); }}
-            >
-              {t("a6.expand.level", { n: 2 })}
-            </div>
-            <div
-              className="pop-item"
-              data-testid="vt-level-3"
-              onClick={() => { setMenuOpen(false); p.onReplaceFolds(expandToLevelFolds(ctx, 3)); }}
-            >
-              {t("a6.expand.level", { n: 3 })}
-            </div>
-            <div
-              className={`pop-item${p.selectedId ? "" : " muted"}`}
-              data-testid="vt-subtree"
-              title={p.selectedId ? t("a6.expand.subtree.title") : ""}
-              onClick={() => {
-                if (!p.selectedId) return;
-                setMenuOpen(false);
-                p.onReplaceFolds(
-                  expandSubtreeFolds(ctx, p.selectedId, p.folds),
-                );
-              }}
-            >
-              {t("a6.expand.subtree")}
-            </div>
-            <div
-              className={`pop-item${p.canRestore ? "" : " muted"}`}
-              data-testid="vt-restore"
-              title={t("a6.restore.title")}
-              onClick={() => {
-                if (!p.canRestore) return;
-                setMenuOpen(false);
-                p.onRestoreLast();
-              }}
-            >
-              {t("a6.restore")}
-            </div>
+            {treeTools && (
+              <>
+                <div
+                  className="pop-item"
+                  data-testid="vt-level-1"
+                  onClick={() => { setMenuOpen(false); p.onReplaceFolds(expandToLevelFolds(ctx, 1)); }}
+                >
+                  {t("a6.expand.level", { n: 1 })}
+                </div>
+                <div
+                  className="pop-item"
+                  data-testid="vt-level-2"
+                  onClick={() => { setMenuOpen(false); p.onReplaceFolds(expandToLevelFolds(ctx, 2)); }}
+                >
+                  {t("a6.expand.level", { n: 2 })}
+                </div>
+                <div
+                  className="pop-item"
+                  data-testid="vt-level-3"
+                  onClick={() => { setMenuOpen(false); p.onReplaceFolds(expandToLevelFolds(ctx, 3)); }}
+                >
+                  {t("a6.expand.level", { n: 3 })}
+                </div>
+                <div
+                  className={`pop-item${p.selectedId ? "" : " muted"}`}
+                  data-testid="vt-subtree"
+                  title={p.selectedId ? t("a6.expand.subtree.title") : ""}
+                  onClick={() => {
+                    if (!p.selectedId) return;
+                    setMenuOpen(false);
+                    p.onReplaceFolds(
+                      expandSubtreeFolds(ctx, p.selectedId, p.folds),
+                    );
+                  }}
+                >
+                  {t("a6.expand.subtree")}
+                </div>
+                <div
+                  className={`pop-item${p.canRestore ? "" : " muted"}`}
+                  data-testid="vt-restore"
+                  title={t("a6.restore.title")}
+                  onClick={() => {
+                    if (!p.canRestore) return;
+                    setMenuOpen(false);
+                    p.onRestoreLast();
+                  }}
+                >
+                  {t("a6.restore")}
+                </div>
+              </>
+            )}
             {/* B2 layout switch: 横向树/纵向树/大纲. Menu clicks do NOT close
                 the menu (density lock below relies on the same contract). */}
             <div className="pop-item dotmenu-line" data-testid="vt-layout" role="radiogroup" title={t("vt.layout.title")}>

@@ -17,13 +17,13 @@ import { api, enterStudio } from "./helpers";
 const card = (page: Page, text: string) => page.locator(".rm-card", { hasText: text });
 
 async function openMenu(page: Page) {
-  await page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+  await page.getByTestId("vt-menu").click();
 }
 
 async function closeMenu(page: Page) {
   // 再点一次 ⋯ 收起菜单。不能点画布空白处：onPaneClick 会清除选中节点，
   // 「视图外提示」用例正是要在选中被筛节点后关菜单。
-  await page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+  await page.getByTestId("vt-menu").click();
 }
 
 interface Fixture {
@@ -166,6 +166,15 @@ test("泳道：列头三枚（第一轮/第二轮/未分配）+ 行头 + 卡片�
   await expect(headers).toBeVisible();
   await expect(headers.locator(".swim-col")).toHaveText(["第一轮", "第二轮", "未分配"]);
   await expect(headers.locator(".swim-row", { hasText: "版本R：一级路线" })).toBeVisible();
+  // F07：泳道忽略折叠/分支态——无效控件收敛（工具条按钮、卡片折叠、右键菜单）
+  await expect(page.getByTestId("vt-expand-all")).toHaveCount(0);
+  await expect(page.getByTestId("vt-collapse-all")).toHaveCount(0);
+  await expect(card(page, "版本C").locator(".fold-btn")).toHaveCount(0);
+  await card(page, "版本C").click({ button: "right" });
+  const ctx = page.locator(".ctx");
+  await expect(ctx).toBeVisible();
+  await expect(ctx).not.toContainText("只看这一分支");
+  await expect(ctx.getByText("新增子节点")).toBeVisible(); // 其余项照常
   // 网格是全量在筛人口：四个节点全部成卡（树边不画，卡片照常）
   await expect(card(page, "版本A")).toBeVisible();
   await expect(card(page, "版本B")).toBeVisible();

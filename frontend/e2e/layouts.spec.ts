@@ -16,7 +16,7 @@ async function cardBox(page: Page, title: string) {
 }
 
 const openMenu = (page: Page) =>
-  page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+  page.getByTestId("vt-menu").click();
 
 test("切纵向树：父子沿 +Y 生长；切回横向恢复横向折叠集", async ({ page }) => {
   const ids = Array.from({ length: 5 }, () => crypto.randomUUID());

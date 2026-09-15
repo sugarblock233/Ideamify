@@ -249,9 +249,11 @@ function Inner(p: CanvasProps) {
         connectable: false,
         data: {
           node: n,
-          folded: p.folds.has(n.id),
+          // F07: swimlane ignores fold state (computeSwimlane) — no fold
+          // control on its cards, not a clickable "–" that does nothing.
+          folded: p.mode === "swimlane" ? false : p.folds.has(n.id),
           hiddenCount: pos.hiddenCount,
-          hasChildren: n.child_count > 0 || pos.hiddenCount > 0,
+          hasChildren: p.mode === "swimlane" ? false : n.child_count > 0 || pos.hiddenCount > 0,
           mark,
           shared: sharedLabel,
           badgeCount: p.marks.badges.get(n.id),
@@ -733,6 +735,7 @@ function Inner(p: CanvasProps) {
           projectId={p.projectId}
           graph={p.graph}
           folds={p.folds}
+          foldable={p.mode !== "swimlane"}
           onToggleFold={p.onToggleFold}
           onAddChild={p.onAddChild}
           onBranchRoot={p.onBranchRoot}
@@ -839,6 +842,7 @@ function CtxMenu({
   projectId,
   graph,
   folds,
+  foldable,
   onToggleFold,
   onAddChild,
   onBranchRoot,
@@ -850,6 +854,9 @@ function CtxMenu({
   projectId: string;
   graph: GraphNode[];
   folds: ReadonlySet<string>;
+  /** F07: false on the swimlane — that mode ignores fold/branch state, so the
+   *  two dead menu items are dropped instead of pretending to work. */
+  foldable: boolean;
   onToggleFold: (id: string) => void;
   onAddChild: (parentId: string | null) => void;
   onBranchRoot: (id: string | null) => void;
@@ -863,8 +870,12 @@ function CtxMenu({
   const items: { label: string; run: () => void }[] = [
     { label: t("ctx.open.details"), run: () => { onSelect(n.id); onClose(); } },
     { label: t("ctx.add.child"), run: () => { onAddChild(n.id); onClose(); } },
-    { label: folds.has(n.id) ? t("ctx.expand.branch") : t("ctx.collapse.branch"), run: () => { onToggleFold(n.id); onClose(); } },
-    { label: t("ctx.only.branch"), run: () => { onBranchRoot(n.id); onClose(); } },
+    ...(foldable
+      ? [
+          { label: folds.has(n.id) ? t("ctx.expand.branch") : t("ctx.collapse.branch"), run: () => { onToggleFold(n.id); onClose(); } },
+          { label: t("ctx.only.branch"), run: () => { onBranchRoot(n.id); onClose(); } },
+        ]
+      : []),
     {
       label: t("ctx.copy.deeplink"),
       run: () => {
