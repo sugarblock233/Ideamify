@@ -920,9 +920,13 @@ async function rebaseDraft() {
 
   const cancelNodeDraft = useCallback(() => setNodeDraft(null), []);
 
-  /** Partial update from either editor (canvas DraftCard / side panel form). */
-  const patchNodeDraftFields = useCallback((patch: Partial<Draft>) => {
-    setNodeDraft((s) => (s ? { ...s, fields: { ...s.fields, ...patch } } : s));
+  /** Partial update from either editor (canvas DraftCard / side panel form).
+   *  F01: accepts a functional updater so async callbacks (image upload)
+   *  merge against the live session instead of a stale snapshot. */
+  const patchNodeDraftFields = useCallback((patch: Partial<Draft> | ((cur: Draft) => Partial<Draft>)) => {
+    setNodeDraft((s) =>
+      s ? { ...s, fields: { ...s.fields, ...(typeof patch === "function" ? patch(s.fields) : patch) } } : s,
+    );
   }, []);
 
   /** §10.1/§10.2: submit the create draft. The op mirrors the old modal's

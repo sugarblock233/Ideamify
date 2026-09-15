@@ -185,3 +185,86 @@ test("外链图片不加载，降级为占位条（含 URL 文本）", async ({ 
   await expect(ph).toContainText("https://外部.example/a.png");
   expect(externalFetch).toBe(0);
 });
+
+test("F01: 上传等待期间的新输入不被回调覆盖；取消会话后不写回", async ({ page }) => {
+  const { pid, rev } = await makeProject(page, `E2E 竞态-${crypto.randomUUID().slice(0, 8)}`);
+  await seedRoute(page, pid, rev, "竞态宿主路线");
+  await enterStudio(page, pid);
+
+  // 延迟回执：服务器已入库，但浏览器先继续编辑 2.5s 再收到响应
+  await page.route("**/api/v1/projects/*/attachments", async (route) => {
+    if (route.request().method() !== "POST") return route.continue_();
+    const resp = await page.request.fetch(route.request());
+    await new Promise((s) => setTimeout(s, 2500));
+    await route.fulfill({ response: resp });
+  });
+
+  const nodeDetail = await openDetailsEditor(page, "竞态宿主路线");
+  const titleBox = page.locator(".editform input").first();
+  const md = nodeDetail;
+  await page.getByTestId("md-image-input").setInputFiles({
+    name: "慢图.png", mimeType: "image/png", buffer: PNG_1X1,
+  });
+  // 等待期间改标题 + 改正文（整段替换，最严的并发形状）
+  await titleBox.fill("上传期间新输入：不应该丢失");
+  await md.fill("上传期间新增的正文：必须保留");
+  // 上传回执到达：引用必须落在「新」正文之后，标题等其他字段不被回退
+  await expect(md).toHaveValue(/attachment:[0-9a-f-]{36}/);
+  const mdValue = await md.inputValue();
+  expect(mdValue).toContain("上传期间新增的正文：必须保留");
+  expect(mdValue.indexOf("上传期间新增的正文")).toBeLessThan(mdValue.indexOf("attachment:"));
+  await expect(titleBox).toHaveValue("上传期间新输入：不应该丢失");
+  await page.unroute("**/api/v1/projects/*/attachments");
+
+  // 保存：走一次真提交确认整体一致
+  const nid = (await api(page, "GET", `/api/v1/projects/${pid}/graph`)).json.nodes[0].id as string;
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/commits") && r.request().method() === "POST"),
+    page.getByRole("button", { name: "保存" }).click(),
+  ]);
+  const node = (await api(page, "GET", `/api/v1/projects/${pid}/nodes/${nid}`)).json;
+  expect(node.title).toBe("上传期间新输入：不应该丢失");
+  expect(node.details_md).toContain("attachment:");
+  expect(node.details_md).toContain("上传期间新增的正文");
+});
+
+test("F01: 取消会话后，迟到回执不写入新会话的草稿", async ({ page }) => {
+  const { pid, rev } = await makeProject(page, `E2E 迟到-${crypto.randomUUID().slice(0, 8)}`);
+  const rev2 = await seedRoute(page, pid, rev, "迟到宿主路线");
+  await enterStudio(page, pid);
+
+  await page.route("**/api/v1/projects/*/attachments", async (route) => {
+    if (route.request().method() !== "POST") return route.continue_();
+    const resp = await page.request.fetch(route.request());
+    await new Promise((s) => setTimeout(s, 2000));
+    await route.fulfill({ response: resp });
+  });
+
+  // 新建草稿会话：上传进行中取消整个会话（CreateDraftTab 卸载）
+  await page.getByRole("button", { name: "+ 一级路线" }).click();
+  await page.getByTestId("draft-heading").waitFor();
+  await page.locator(".editform input").first().fill("迟到草稿将被取消");
+  await page.getByRole("button", { name: /长说明/ }).click();
+  await page.getByTestId("md-image-input").setInputFiles({
+    name: "迟到.png", mimeType: "image/png", buffer: PNG_1X1,
+  });
+  await expect(page.getByTestId("md-editor")).toBeVisible();
+  await page.getByRole("button", { name: "取消（恢复原值）" }).click(); // 表单卸载，回执未到
+  await page.getByTestId("draft-heading").waitFor({ state: "detached" });
+
+  // 迟到回执落空后重开新会话：新草稿正文不含任何 attachment 引用
+  await page.getByRole("button", { name: "+ 一级路线" }).click();
+  await page.getByTestId("draft-heading").waitFor();
+  await page.getByRole("button", { name: /长说明/ }).click();
+  const md = page.getByTestId("md-editor");
+  await page.waitForTimeout(2200); // 越过延迟回执
+  await expect(md).toBeVisible();
+  await expect(md).not.toHaveValue(/attachment:/);
+
+  // 无 attached 翻转，无提交
+  const revNow = (await api(page, "GET", `/api/v1/projects/${pid}`)).json.revision as number;
+  expect(revNow).toBe(rev2);
+  const items = (await api(page, "GET", `/api/v1/projects/${pid}/attachments`)).json.items;
+  expect(items).toHaveLength(1);
+  expect(items[0].state).toBe("staged");
+});

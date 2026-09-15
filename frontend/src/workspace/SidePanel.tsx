@@ -127,7 +127,9 @@ export interface SidePanelProps {
   onClearVersionFilter: () => void;
 
   draft: Draft | null;
-  setDraft: (d: Draft | null) => void;
+  /** F01: accepts a functional updater so async callbacks (image upload)
+   *  merge against the LATEST draft, never the render-captured snapshot. */
+  setDraft: (d: Draft | null | ((cur: Draft | null) => Draft | null)) => void;
   dirty: boolean;
   /** A02: draft baseline is older than the loaded project revision. */
   draftStale: boolean;
@@ -183,7 +185,8 @@ export interface SidePanelProps {
     fields: Draft;
     err: string | null;
     busy: boolean;
-    onFields: (f: Draft) => void;
+    /** F01: functional-capable patch, merged against the live session. */
+    onFields: (patch: Partial<Draft> | ((cur: Draft) => Partial<Draft>)) => void;
     onSave: () => void;
     onCancel: () => void;
   } | null;
@@ -276,7 +279,10 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
     setEditing(false);
   }, [n.id]);
   const d = p.draft ?? draftOf(n);
-  const set = (patch: Partial<Draft>) => p.setDraft({ ...d, ...patch });
+  // F01: merge into the live draft through a functional updater — the `d`
+  // snapshot above goes stale the moment an async callback (upload) runs.
+  const set = (patch: Partial<Draft> | ((cur: Draft) => Partial<Draft>)) =>
+    p.setDraft((cur) => (cur ? { ...cur, ...(typeof patch === "function" ? patch(cur) : patch) } : cur));
 
   const missing: string[] = [];
   if (d.status === "supported" || d.status === "not_supported") {
@@ -431,7 +437,9 @@ export function NodeFieldsForm({
   versions,
 }: {
   d: Draft;
-  set: (patch: Partial<Draft>) => void;
+  /** F01: accepts a functional updater so async callbacks merge against the
+   *  live draft instead of the render-captured snapshot. */
+  set: (patch: Partial<Draft> | ((cur: Draft) => Partial<Draft>)) => void;
   pid: string | null;
   /** E 批 §7：可选（旧调用点可不传）；传入后显示科研版本 chip 多选 */
   versions?: ResearchVersion[];
@@ -446,6 +454,13 @@ export function NodeFieldsForm({
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [upBusy, setUpBusy] = useState(false);
   const [upErr, setUpErr] = useState<string | null>(null);
+  // F01: the upload callback is guarded by the form's own lifetime. The
+  // form remounts for every editing session (toggle 编辑/取消, node switch,
+  // create-session lifecycle), so a response landing after the session ended
+  // is dropped — the staged file goes to the 30-day GC — instead of writing
+  // into whatever draft (reverted or a NEW session's) is live by then.
+  const aliveRef = useRef(true);
+  useEffect(() => () => { aliveRef.current = false; }, []);
   const uploadFile = (file: File) => {
     if (!pid || upBusy) return;
     if (!/^image\//i.test(file.type)) {
@@ -457,7 +472,10 @@ export function NodeFieldsForm({
     api
       .uploadAttachment(pid, file)
       .then((att) => {
-        set({ details_md: appendAttachmentRef(d.details_md, att.id, att.original_name ?? file.name) });
+        // F01: append via the functional setter so concurrent title/summary/
+        // status edits in the same (still mounted) session stay put.
+        if (!aliveRef.current) return; // session ended while in flight → drop
+        set((cur) => ({ details_md: appendAttachmentRef(cur.details_md, att.id, att.original_name ?? file.name) }));
       })
       .catch((e: unknown) => {
         setUpErr(e instanceof ApiError ? `${t("att.upload.failed")} ${e.message}` : t("att.upload.failed"));
@@ -740,7 +758,9 @@ function CreateDraftTab({
 }) {
   const t = useT();
   const d = draft.fields;
-  const set = (patch: Partial<Draft>) => draft.onFields({ ...d, ...patch });
+  // F01: pass the patch through — the session handler merges against the live
+  // state; the render-captured `d` is only for the controls below.
+  const set = (patch: Partial<Draft> | ((cur: Draft) => Partial<Draft>)) => draft.onFields(patch);
   const missing: string[] = [];
   if (d.status === "supported" || d.status === "not_supported") {
     if (!d.scope.trim()) missing.push(t("fld.scope.gate"));
