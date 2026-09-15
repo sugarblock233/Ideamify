@@ -96,6 +96,22 @@ test("键盘调宽：separator 聚焦后 ← 加宽、→ 收窄", async ({ page
   expect(await widthOf(page)).toBe(w0);
 });
 
+test("窄侧栏：详情内容跟随面板收缩，不产生横向溢出", async ({ page }) => {
+  const s = await seedDeepTree(page);
+  await enterStudio(page, s.pid, s.a);
+  await expect(page.locator("h2", { hasText: "三层A" })).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await dragHandle(page, 180); // 收窄到最小面板宽度
+
+  const dimensions = await panel(page).evaluate((el) => ({
+    clientWidth: el.clientWidth,
+    scrollWidth: el.scrollWidth,
+  }));
+  expect(dimensions.scrollWidth, "详情内容不应撑出侧栏").toBeLessThanOrEqual(dimensions.clientWidth + 1);
+  await expect(page.locator(".side .editform")).toBeVisible();
+});
+
 test("窄屏（<1000px）切换为覆盖式抽屉：把手消失、画布满宽、rail 仍可点", async ({ page }) => {
   const s = await seedDeepTree(page);
   await page.setViewportSize({ width: 900, height: 700 });

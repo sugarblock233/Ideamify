@@ -37,7 +37,7 @@ async function enterStudio(page, pid: string) {
   await expect(page.getByText("ResearchMap").first()).toBeVisible();
   await page.getByPlaceholder("访问令牌（Bearer token）").fill(TOKEN);
   await page.getByRole("button", { name: "打开" }).click();
-  await expect(page.locator("select")).toHaveValue(pid);
+  await expect(page.locator(".project-sel")).toHaveValue(pid);
 }
 
 /** 顶级路线：TopBar「+ 一级路线」→ 侧栏草稿会话（C2：弹窗已退役；表单字段

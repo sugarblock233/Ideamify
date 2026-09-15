@@ -107,7 +107,7 @@ async function enterStudio(page, pid: string) {
   await expect(page.getByText("ResearchMap").first()).toBeVisible();
   await page.getByPlaceholder("访问令牌（Bearer token）").fill(TOKEN);
   await page.getByRole("button", { name: "打开" }).click();
-  await expect(page.locator("select")).toHaveValue(pid);
+  await expect(page.locator(".project-sel")).toHaveValue(pid);
   await expect(page.locator(".rm-card").first()).toBeVisible({ timeout: 20_000 });
 }
 

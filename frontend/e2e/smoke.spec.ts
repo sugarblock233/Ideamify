@@ -77,7 +77,7 @@ async function enterStudio(page, pid: string) {
   await page.getByRole("button", { name: "打开" }).click();
   // 项目切换 <select> 选中值 = 本项目 id（<option> 在折叠的 select 里
   // 恒算 hidden，不能对它 toBeVisible，用 toHaveValue 断言）。
-  await expect(page.locator("select")).toHaveValue(pid);
+  await expect(page.locator(".project-sel")).toHaveValue(pid);
   await expect(page.locator(".rm-card", { hasText: "主相可再现窗口" }).first())
     .toBeVisible({ timeout: 20_000 });
 }

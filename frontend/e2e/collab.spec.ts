@@ -32,6 +32,35 @@ test("AI updates remain refreshable after reading another node", async ({ page }
   await expect(page.locator(".rm-card", { hasText: "AI updated route" })).toBeVisible();
 });
 
+test("快速切换节点时，迟到的旧详情响应不会覆盖当前选择", async ({ page }) => {
+  const s = await seedDeepTree(page);
+  const second = crypto.randomUUID();
+  const revision = (await api(page, "GET", `/api/v1/projects/${s.pid}`)).json.revision;
+  const created = await api(page, "POST", `/api/v1/projects/${s.pid}/commits`, {
+    request_id: crypto.randomUUID(), expected_revision: revision,
+    summary: "e2e：第二条一级路线用于切换竞态",
+    operations: [{ op: "node.create", id: second, parent_id: null, kind: "idea",
+      title: "三层D：第二条一级路线", summary: "快速切换目标", status: "in_progress" }],
+  });
+  expect(created.status, JSON.stringify(created.json)).toBe(200);
+  await enterStudio(page, s.pid);
+  await expect(page.locator(".rm-card", { hasText: "三层D" })).toBeVisible();
+
+  let release!: () => void;
+  const stalled = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**/api/v1/projects/${s.pid}/nodes/${s.a}`, async (route) => {
+    await stalled;
+    await route.continue();
+  });
+  await page.locator(".rm-card", { hasText: "三层A" }).click();
+  await page.locator(".rm-card", { hasText: "三层D" }).click();
+  await expect(page.locator("h2", { hasText: "三层D" })).toBeVisible({ timeout: 10_000 });
+  release();
+  await expect(page.locator("h2", { hasText: "三层D" })).toBeVisible();
+  await expect(page.locator("h2", { hasText: "三层A" })).toHaveCount(0);
+  await page.unroute(`**/api/v1/projects/${s.pid}/nodes/${s.a}`);
+});
+
 test("browser reload warns before discarding a research draft", async ({ page }) => {
   const s = await seedDeepTree(page);
   await enterStudio(page, s.pid, s.a);

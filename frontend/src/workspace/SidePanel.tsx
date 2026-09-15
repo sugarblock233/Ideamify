@@ -794,7 +794,13 @@ function CreateDraftTab({
           {t("detail.gate.hint", { status: statusLabel(d.status), items: missing.join(t("common.list.sep")) })}
         </div>
       )}
-      <NodeFieldsForm d={d} set={set} pid={pid} versions={versions} />
+      {/* Keep the draft immutable while the create request is in flight. The
+          canvas card is already pointer-blocked in this state; the same rule
+          must cover the full side form or a successful request could discard
+          keystrokes entered after the payload was frozen. */}
+      <fieldset disabled={draft.busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <NodeFieldsForm d={d} set={set} pid={pid} versions={versions} />
+      </fieldset>
       <div className="savebar">
         <button className="primary" onClick={draft.onSave} disabled={blocked} data-testid="draft-save">
           {draft.busy ? t("modal.creating") : t("modal.create")}

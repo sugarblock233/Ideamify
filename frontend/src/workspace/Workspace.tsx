@@ -267,6 +267,9 @@ export default function Workspace({
   const [searchLoading, setSearchLoading] = useState(false);
 
   const selectedRef = useRef<string | null>(null);
+  // Each selection gets a monotonically increasing token. Network responses
+  // for an older click must never replace the detail view of a newer click.
+  const selectionSeqRef = useRef(0);
   const incArchRef = useRef(false);
   /** One graph read for the whole file, so "show archived" can never diverge
    *  between the first load, commit syncs and manual refreshes (B04). */
@@ -351,6 +354,7 @@ export default function Workspace({
           includeArchived: inc,
           limit: 20,
         });
+        if (selectedRef.current !== id) return;
         setRelations((prev) => (append ? [...prev, ...r.items] : r.items));
         setRelHasMore(r.has_more);
         setRelCursor(r.next_cursor);
@@ -365,6 +369,7 @@ export default function Workspace({
     async (id: string, cursor: string | null = null, append: boolean = false) => {
       try {
         const r = await api.commits(pid, { nodeId: id, limit: 20, cursor: cursor ?? undefined });
+        if (selectedRef.current !== id) return;
         if (!append) setHistNodeId(id);
         setCommits((prev) => (append ? [...prev, ...r.items] : r.items));
         setCommitCursor(r.next_cursor ?? null);
@@ -410,6 +415,7 @@ export default function Workspace({
     if (sel) {
       try {
         const nf = await api.node(pid, sel);
+        if (selectedRef.current !== sel) return;
         setNode(nf);
         setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
         // A02/R02: a dirty draft is rebased onto the fresh snapshot — untouched
@@ -422,6 +428,7 @@ export default function Workspace({
           ironToast(t("ws.conflict.after.refresh"), "err");
         }
       } catch {
+        if (selectedRef.current !== sel) return;
         setNode(null);
         setDraft(null);
         setDraftBase(null);
@@ -451,6 +458,11 @@ export default function Workspace({
   const selectNode = useCallback(
     async (id: string, opts: { locate?: boolean; silent?: boolean } = {}) => {
       if (!guardLeave(id)) return;
+      const selectionSeq = ++selectionSeqRef.current;
+      // Update the ref synchronously; the effect below mirrors it for normal
+      // renders, but an immediate second click must invalidate the first
+      // request before either response is allowed to commit state.
+      selectedRef.current = id;
       if (id === selectedId && node) {
         // A02: re-clicking the current node must never wipe a live draft —
         // it just re-centers the canvas.
@@ -476,6 +488,7 @@ export default function Workspace({
       setNodeLoading(true);
       try {
         const nf = await api.node(pid, id);
+        if (selectionSeq !== selectionSeqRef.current || selectedRef.current !== id) return;
         setNode(nf);
         const d0 = draftOf(nf);
         setDraft(d0);
@@ -484,10 +497,13 @@ export default function Workspace({
         setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
         setDraftBaseRev(nf.project_revision);
       } catch (e) {
-        ironToast(e instanceof ApiError ? e.message : t("ws.node.load.fail"), "err");
+        if (selectionSeq === selectionSeqRef.current && selectedRef.current === id) {
+          ironToast(e instanceof ApiError ? e.message : t("ws.node.load.fail"), "err");
+        }
       } finally {
-        setNodeLoading(false);
+        if (selectionSeq === selectionSeqRef.current) setNodeLoading(false);
       }
+      if (selectionSeq !== selectionSeqRef.current || selectedRef.current !== id) return;
       loadNodeRelations(id, incArchRef.current, null, false);
       loadNodeCommits(id);
       if (opts.locate) setPendingLocate({ nodeId: id });
@@ -498,9 +514,12 @@ export default function Workspace({
 
   const clearSelection = useCallback(() => {
     if (!guardLeave()) return;
+    selectionSeqRef.current += 1;
+    selectedRef.current = null;
     setSelectedId(null);
     setSelectedRelationId(null);
     setNode(null);
+    setNodeLoading(false);
     setDraft(null);
     setDraftBase(null);
     setRelations([]);
@@ -729,6 +748,7 @@ export default function Workspace({
 
   async function loadUpdates() {
     const prev = graph;
+    const sel = selectedRef.current;
     try {
       const g = await fetchGraph();
       const prevMap = new Map(prev.map((n) => [n.id, n]));
@@ -763,9 +783,10 @@ export default function Workspace({
       graphRevisionRef.current = g.project_revision;
       setProject((p) => (p ? { ...p, revision: g.project_revision } : p));
       setPendingRev(null);
-      if (selectedRef.current) {
+      if (sel) {
         try {
-          const nf = await api.node(pid, selectedRef.current);
+          const nf = await api.node(pid, sel);
+          if (selectedRef.current !== sel) return;
           setNode(nf);
           setProject((p) => (p ? { ...p, revision: nf.project_revision } : p));
           // A02/T22/R02: an explicit "载入更新" rebases the live draft onto the
@@ -776,8 +797,8 @@ export default function Workspace({
         } catch {
           /* node may have been archived away; next selection will 404-warn */
         }
-        loadNodeRelations(selectedRef.current, incArchRef.current, null, false);
-        loadNodeCommits(selectedRef.current);
+        loadNodeRelations(sel, incArchRef.current, null, false);
+        loadNodeCommits(sel);
       }
       ironToast(t("ws.updates.loaded"), "ok");
     } catch (e) {

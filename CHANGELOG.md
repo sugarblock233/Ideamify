@@ -8,6 +8,11 @@ migration steps will be noted here.
 
 ### Added
 
+- Refreshed the visual system across the project dashboard and research
+  workspace: dark utility navigation, warm paper canvas, clearer status
+  accents, softer cards, and improved panel hierarchy while preserving the
+  existing interaction model.
+
 - Local single-user project manager as the default entry: no login or token
   setup, searchable project cards, recent/name sorting, creation and return
   from maps with unsaved-draft protection. Project lists include every API page.
@@ -103,6 +108,11 @@ migration steps will be noted here.
 
 ### Fixed
 
+- Detail-panel content now follows live sidebar resizing without fixed-width
+  form controls or evidence rows causing horizontal overflow.
+- Rapid node switching no longer lets a late detail response replace the
+  currently selected node; create forms are locked while their request is in
+  flight so typed values cannot be discarded on success.
 - AI updates remain detectable after selecting another node. Refresh now
   compares against the graph actually loaded, so new records are not missed.
 - Ordinary browser reloads and navigation warn before discarding unsaved

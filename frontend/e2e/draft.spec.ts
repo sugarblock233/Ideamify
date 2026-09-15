@@ -301,12 +301,20 @@ test("F03: 保存成功但回执丢失——重放冻结请求收束，冻结期
   await form.locator("input").first().fill("回执丢失仍能收束的路线");
 
   // 服务器_COMMIT 成功，但浏览器收到合成 503（成功回执丢失）
+  let releaseReceipt!: () => void;
+  const receiptPending = new Promise<void>((resolve) => { releaseReceipt = resolve; });
   await page.route("**/commits", async (route) => {
     if (route.request().method() !== "POST") return route.continue_();
     await page.request.fetch(route.request()); // 服务器实际入库
+    await receiptPending;
     await route.fulfill({ status: 503, body: "synthetic lost receipt", contentType: "text/plain" });
   });
-  await panel.getByRole("button", { name: "创建" }).click();
+  const firstSave = panel.getByRole("button", { name: "创建" }).click();
+  // The payload is frozen while the request is in flight; side-panel fields
+  // must be disabled so a late success cannot discard new keystrokes.
+  await expect(form.locator("input").first()).toBeDisabled();
+  releaseReceipt();
+  await firstSave;
   await expect(page.locator(".rm-draft")).toHaveCount(1); // 结果不明 → 草稿保留
 
   // 失败后继续编辑（改摘要）——旧实现会在重试时因 payload 变化被

@@ -727,3 +727,194 @@ button.chip.ver-chip.on {
   .dashboard-tools > input { flex-basis: 100%; }
   .dashboard-tools > select { flex: 1; }
 }
+
+/* -------------------------------------------------------------------------
+   ResearchMap visual refresh
+   A warmer editorial workspace with a dark utility bar, paper canvas and
+   clearer status accents. The existing class names stay intact so behavior,
+   accessibility hooks and e2e selectors remain stable.
+   ------------------------------------------------------------------------- */
+:root {
+  --bg: #f4f1eb;
+  --panel: #fffdf9;
+  --ink: #17252a;
+  --ink-dim: #647176;
+  --line: #d9dedb;
+  --accent: #147d72;
+  --accent-ink: #ffffff;
+  --card: #fffefa;
+  --card-edge: #cbd5d1;
+  --sel: #db7657;
+  --st-blue: #3b82c4;
+  /* Keep the semantic status palette stable for integrations and visual
+     assertions; the refresh changes surfaces and hierarchy around it. */
+  --st-green: #2e8b46;
+  --st-red: #c33a2e;
+  --st-yellow: #c58b28;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: .005em;
+}
+
+button, input, textarea, select { border-radius: 9px; }
+button { transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease, box-shadow .16s ease; }
+button:hover { border-color: #8aa09a; }
+button:active { transform: translateY(1px); }
+button.primary { background: var(--accent); border-color: var(--accent); box-shadow: 0 3px 10px rgba(20,125,114,.2); }
+button.primary:hover { background: #0f6c63; border-color: #0f6c63; box-shadow: 0 5px 14px rgba(20,125,114,.28); }
+input, textarea, select { border-color: #ccd6d2; background: #fffefa; }
+input:focus, textarea:focus, select:focus { outline: 3px solid rgba(20,125,114,.16); border-color: var(--accent); }
+
+/* Utility bar */
+.topbar {
+  min-height: 58px;
+  padding: 8px 18px;
+  gap: 9px;
+  background: #102f35;
+  border-bottom: 1px solid #23484d;
+  color: #eaf4f0;
+  box-shadow: 0 2px 10px rgba(16,47,53,.16);
+}
+.topbar .brand { color: #c5f0df; font-size: 15px; letter-spacing: -.01em; }
+.home-button { color: #c5f0df; }
+.home-button:hover { color: #fff; }
+.topbar button { color: #eaf4f0; background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.2); }
+.topbar button:hover { color: #fff; background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.42); }
+.topbar button.primary { background: #d87b5a; border-color: #d87b5a; color: #fff; }
+.topbar .project-sel { background: #173b41; color: #f1faf6; border-color: #3a6064; }
+.topbar .searchbox input { background: #f8fcfa; border-color: transparent; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.topbar .searchbox input::placeholder { color: #718086; }
+.topbar .conn, .topbar-conn-item { color: #afc4c3; }
+.topbar .pop { color: var(--ink); }
+.menu .dotmenu.open, .vtool .vt-menu.open { color: #fff; border-color: #8bd6c4; }
+
+/* Canvas */
+.canvas-wrap { background: #f7f4ee; }
+.react-flow__pane { background: radial-gradient(circle at 1px 1px, rgba(28,67,69,.13) 1px, transparent 1.1px); background-size: 22px 22px; }
+.react-flow__background pattern circle { fill: #b9c9c4; opacity: .46; }
+.react-flow__controls { border: 1px solid #cdd7d3; border-radius: 10px; overflow: hidden; box-shadow: 0 5px 16px rgba(28,54,52,.12); }
+.react-flow__controls button { background: rgba(255,253,249,.95); color: #45615f; border-bottom-color: #d9e0dc; }
+.react-flow__minimap { border: 1px solid #cbd6d1; border-radius: 12px; overflow: hidden; box-shadow: 0 6px 18px rgba(28,54,52,.12); background: rgba(255,253,249,.9); }
+.rm-card {
+  background: rgba(255,254,250,.96);
+  border-color: #c5d2ce;
+  border-left-width: 4px;
+  border-radius: 13px;
+  box-shadow: 0 5px 16px rgba(34,64,62,.10), 0 1px 2px rgba(34,64,62,.06);
+  padding: 11px 13px 9px 14px;
+}
+.rm-card:hover { box-shadow: 0 8px 22px rgba(34,64,62,.16), 0 1px 2px rgba(34,64,62,.08); }
+.rm-card.selected { border-color: var(--sel); box-shadow: 0 0 0 3px rgba(219,118,87,.18), 0 8px 22px rgba(34,64,62,.14); }
+.rm-card .title { color: #1e3033; font-size: 14px; line-height: 1.38; }
+.rm-card .summary { color: #6a7779; line-height: 1.45; }
+.kind-badge { color: #54706c; border-color: #cbd8d3; background: #f2f7f3; border-radius: 5px; }
+.status-pill { font-weight: 600; }
+.tag { color: #137468; background: #e4f2eb; border-radius: 999px; padding: 1px 7px; }
+.fold-btn { border-color: #bfd0ca; background: #fffefa; color: #4f6b67; box-shadow: 0 2px 5px rgba(34,64,62,.12); }
+.fold-btn:hover { color: var(--accent); border-color: var(--accent); }
+.rm-root { background: #e6f0ec; border-color: #9bb9ae; border-radius: 13px; box-shadow: 0 4px 12px rgba(34,64,62,.08); }
+.rm-root .pname { color: #1e5550; }
+.relabel { background: #fffaf0; border-color: #e7c995; color: #76582b; border-radius: 999px; box-shadow: 0 3px 10px rgba(80,66,38,.12); }
+.vtool { top: 12px; right: 14px; background: rgba(255,253,249,.92); border-color: #cbd7d2; border-radius: 11px; box-shadow: 0 5px 16px rgba(34,64,62,.1); backdrop-filter: blur(8px); }
+.vtool button { color: #4e6864; }
+.vtool button:hover { background: #e7f1ed; color: var(--accent); }
+.breadcrumbs, .relcount-hint, .legend > button { background: rgba(255,253,249,.9); border-color: #cbd7d2; box-shadow: 0 4px 12px rgba(34,64,62,.08); }
+.breadcrumbs a { color: var(--accent); }
+.locate-chip { background: #fffdf9; border-color: var(--accent); color: var(--accent); box-shadow: 0 5px 14px rgba(34,64,62,.14); }
+
+/* Detail panel */
+.side { background: #fffdf9; border-left-color: #cbd7d2; }
+.side .head { padding: 16px 18px 11px; background: linear-gradient(180deg, #fffdf9 0%, #f8f5ef 100%); border-bottom-color: #dbe1dd; }
+.side .head h2 { font-size: 18px; letter-spacing: -.02em; }
+.side .body { padding: 14px 18px 24px; }
+.tabs { padding: 10px 16px 0; background: #fffdf9; border-bottom-color: #dbe1dd; }
+.tabs button { padding: 8px 12px; }
+.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.evid-card { border-color: #d5dfda; border-left-color: var(--accent); background: #fbfdfb; border-radius: 10px; padding: 9px 11px; }
+.rel-item { border-color: #d5dfda; border-radius: 10px; background: #fffefa; padding: 9px 11px; }
+.rel-item.selected { border-color: var(--sel); box-shadow: 0 0 0 2px rgba(219,118,87,.14); }
+.savebar { background: #fffdf9; border-top-color: #dbe1dd; }
+.hint { background: #fff6df; border-color: #e6ca88; border-radius: 9px; }
+.hint.err, .form-err { background: #fff0ed; border-color: #e9b2a8; border-radius: 9px; }
+.hint.ok { background: #e9f6ef; border-color: #acd5bc; border-radius: 9px; }
+
+/* Project home */
+.project-dashboard { background: #f4f1eb; }
+.dashboard-header { padding: 20px max(28px, calc((100vw - 1180px) / 2)); background: #102f35; border-bottom: 0; color: #eaf4f0; box-shadow: 0 3px 14px rgba(16,47,53,.18); }
+.dashboard-header .brand { color: #c5f0df; font-size: 21px; }
+.dashboard-account { color: #b9ccca; }
+.dashboard-account button { color: #eaf4f0; background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.22); }
+.dashboard-main { max-width: 1180px; padding: 58px 28px 72px; }
+.dashboard-intro { margin-bottom: 34px; }
+.dashboard-eyebrow { color: #c36c4e; letter-spacing: .14em; font-size: 11px; }
+.dashboard-intro h1 { color: #183237; font-size: 38px; letter-spacing: -.045em; }
+.dashboard-intro p.muted { color: #647476; max-width: 560px; }
+.dashboard-intro > button { padding: 12px 20px; border-radius: 10px; }
+.dashboard-tools { padding: 11px; background: rgba(255,253,249,.72); border: 1px solid #d9e0dc; border-radius: 13px; box-shadow: 0 4px 14px rgba(34,64,62,.05); }
+.dashboard-tools > input { padding: 12px 14px; border: 0; background: #fffefa; box-shadow: inset 0 0 0 1px #d5dfda; }
+.dashboard-tools > select, .dashboard-tools > button { padding: 11px 13px; }
+.dashboard-count { color: #75817f; margin: 22px 0 14px; }
+.project-grid { gap: 18px; }
+.project-card { padding: 23px; min-height: 236px; background: #fffdf9; border-color: #d4ddd8; border-radius: 15px; box-shadow: 0 4px 12px rgba(34,64,62,.05); }
+.project-card:hover { border-color: #71a99c; box-shadow: 0 10px 26px rgba(34,64,62,.12); transform: translateY(-2px); }
+.project-card-symbol { width: 40px; height: 40px; background: #e2f1ea; color: var(--accent); border-radius: 12px; }
+.project-card h2 { color: #21383b; font-size: 19px; margin-top: 17px; }
+.project-objective { color: #687777; line-height: 1.7; }
+.project-card-meta { color: #84908e; }
+.project-card-enter { border-top-color: #e2e8e4; color: var(--accent); }
+.project-create { background: #fffdf9; border-color: #d4ddd8; border-radius: 15px; box-shadow: 0 5px 18px rgba(34,64,62,.06); padding: 26px; }
+.project-create h2 { color: #21383b; }
+.dashboard-empty { border-color: #b9d0c5; background: rgba(255,253,249,.45); border-radius: 15px; }
+
+@media (max-width: 760px) {
+  .topbar { padding: 7px 10px; }
+  .dashboard-main { padding: 36px 16px 48px; }
+  .dashboard-intro h1 { font-size: 31px; }
+  .dashboard-header { padding: 16px; }
+}
+
+/* Responsive side-panel contents. The panel itself has a live inline width
+   while dragging; descendants must be allowed to shrink with it instead of
+   contributing their intrinsic form/grid width back to the flex item. */
+.side,
+.side > *,
+.side .head,
+.side .body,
+.side .editform,
+.side .readview,
+.side .readsec,
+.side .row {
+  min-width: 0;
+  max-width: 100%;
+}
+.side { container-type: inline-size; container-name: detail-panel; }
+.side .body { overflow-wrap: anywhere; }
+.side input,
+.side textarea,
+.side select { min-width: 0; max-width: 100%; }
+.side .editform > div[style*="display: flex"] { flex-wrap: wrap; }
+.side .editform > div[style*="display: flex"] > select { flex: 1 1 120px; }
+.side .evid-row {
+  grid-template-columns: minmax(0, 86px) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 28px;
+}
+.side .gated-fields .evid-row {
+  grid-template-columns: minmax(0, 96px) minmax(0, 1fr) minmax(0, 1.4fr) 28px;
+}
+.side .evid-row > * { min-width: 0; }
+.side .md-tbl-form { max-width: 100%; flex-wrap: wrap; }
+
+/* At the narrowest useful panel width, evidence fields become a compact
+   stack. Container queries are based on the dragged panel itself, so this
+   responds to sidebar resizing even when the browser viewport stays put. */
+@container detail-panel (max-width: 380px) {
+  .side .evid-row {
+    grid-template-columns: minmax(0, 1fr) 28px;
+    row-gap: 5px;
+  }
+  .side .evid-row > :nth-child(-n + 3) { grid-column: 1; }
+  .side .evid-row > :last-child { grid-column: 2; grid-row: 1 / span 3; }
+}

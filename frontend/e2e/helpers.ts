@@ -68,5 +68,7 @@ export async function enterStudio(page, pid: string, node?: string) {
   await expect(page.getByText("ResearchMap").first()).toBeVisible();
   await page.getByPlaceholder("访问令牌（Bearer token）").fill(TOKEN);
   await page.getByRole("button", { name: "打开" }).click();
-  await expect(page.locator("select")).toHaveValue(pid);
+  // The side panel may be open immediately for a deep link and contains its
+  // own field selects. Scope this assertion to the project switcher.
+  await expect(page.locator(".project-sel")).toHaveValue(pid);
 }
