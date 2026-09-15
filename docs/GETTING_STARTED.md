@@ -106,7 +106,27 @@ browser; they are never part of the research record):
 - **Language**: 中文 / English from the top-bar ⋯ menu; content and API
   fields are never translated.
 
-## 7. Hand the record to your AI
+## 7. Versions and swimlanes
+
+When the work reaches a second or third round, tag the plan with
+**research versions** (v1, v2, v3 …). These are phase labels, not save
+records — the **记录 #N** on screen counts saves, while v1/v2 mark research
+stages; the two never mix.
+
+- **Tag nodes**: open a node's details → 编辑, light up chips in the
+  科研版本 section (a node may belong to several versions) and save. New
+  drafts pre-fill the version you are currently filtering by.
+- **Browse by version**: ⋯ menu → filter by research version (including
+  未分配) to see just that round; matched nodes keep their route ancestors
+  visible as context, and a selected node that got filtered out shows a
+  hint with a one-click restore in the detail panel. The filter survives
+  layout switches and reloads; pick 全部版本 to go back.
+- **Swimlane view**: choose **泳道** in the layout menu for a
+  version × route progress grid — columns are versions plus 未分配, rows
+  are top-level routes; tree edges hide and folds/branch filters don't
+  apply. Good for seeing which routes each round covers at a glance.
+
+## 8. Hand the record to your AI
 
 Use **⋯ → AI 接入说明** to get the server address, project ID and command examples.
 Configure the AI's separate token in its terminal environment, then give it
@@ -126,7 +146,7 @@ be able to run the [CLI](../tools/researchmap.py) with Python 3 and reach the
 same server. `localhost` on another computer is that other computer, not
 this instance; arrange a trusted connection before using a remote AI tool.
 
-## 8. Review the update and finish the session
+## 9. Review the update and finish the session
 
 Use the app's **刷新** or **载入更新** button. Review the new node and history;
 the AI token's name should appear as the actor. Concurrent edits to the same

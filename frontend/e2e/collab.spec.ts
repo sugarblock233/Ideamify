@@ -203,12 +203,12 @@ test("A02 同字段并发提交：409 冲突 → 保留草稿 → 重排合并 �
   // ---- UI 保存 → 409：冲突指示出现，草稿未被丢弃 ----
   await page.getByRole("button", { name: "保存" }).click();
   await expect(
-    page.locator(".hint.err", { hasText: "提交时发生版本冲突" }).first(),
+    page.locator(".hint.err", { hasText: "提交时发生保存冲突" }).first(),
   ).toBeVisible({ timeout: 10_000 });
   await expect(summaryBox).toHaveValue(LOCAL);
 
   // ---- 「载入新版并重排草稿」：同字段冲突进入三方比较，未处理前不可保存 ----
-  await page.getByRole("button", { name: "载入新版并重排草稿" }).click();
+  await page.getByRole("button", { name: "载入最新记录并重排草稿" }).click();
   await expect(
     page.locator(".hint.err", { hasText: "已保留你的值" }).first(),
   ).toBeVisible({ timeout: 10_000 });

@@ -223,7 +223,7 @@ test("409 与断网：草稿保留、错误可见，恢复后重存成功", asyn
   expect(other.status).toBe(200);
 
   await panel.getByRole("button", { name: "创建" }).click();
-  await expect(page.locator(".hint.err", { hasText: "版本冲突" }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".hint.err", { hasText: "保存冲突" }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".rm-draft")).toHaveCount(1); // 草稿保留
   await expect(draftTitle(page)).toHaveValue("冲突后再存的路线");
 

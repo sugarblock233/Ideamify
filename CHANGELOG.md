@@ -47,8 +47,25 @@ migration steps will be noted here.
   panel form. Nothing is committed until you save; cancelling removes the
   card with no record, and a failed save (offline or revision conflict)
   keeps the draft for a retry that cannot create a duplicate.
+- **Research versions**: tag nodes with phase labels (v1, v2, v3 … —
+  displayed as 第一轮/第二轮 by order). Version create/update/archive and
+  per-node assignment all flow through the same commit protocol
+  (idempotency, revision conflicts and before/after history included), and
+  project export gains `schema_version: 3` with the full version and
+  assignment tables.
+- **Version filter and swimlane view**: filter the map by research version
+  (or 未分配) across all layouts and reloads; matched nodes keep their route
+  ancestors visible as context, a selected node caught outside the filter
+  gets a restore hint in the detail panel, and new drafts pre-fill the
+  filtered version. The new 泳道 layout renders versions × top-level routes
+  as a deterministic progress grid — columns per version plus 未分配, one
+  row per route, tree edges hidden and folds intentionally ignored.
 
 ### Changed
+
+- Save records are now consistently labelled 「记录 #N」 (was mixed wording
+  around revision numbers) to keep them clearly distinct from research
+  version labels.
 
 - The node-create modal is retired in favour of the on-map draft card;
   the side panel keeps the same form, accessible names and A06 evidence

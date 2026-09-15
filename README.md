@@ -33,6 +33,10 @@ read and update the same record, so a new session can pick up where you left off
   render inline with click-to-zoom. Images are served only through an
   authenticated endpoint (the token never appears in an image URL), and
   external image URLs are never fetched.
+- Research versions and swimlanes (new): tag the plan with v1/v2/v3 phase
+  labels (unrelated to the 记录 #N save counter); filtering by version keeps
+  route ancestors visible as context, and the swimlane view lays versions ×
+  top-level routes out as one progress grid.
 
 The app displays the name **ResearchMap**.
 Ideamify is the repository name; the CLI and `RESEARCHMAP_*` configuration

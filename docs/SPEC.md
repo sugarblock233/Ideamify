@@ -214,7 +214,7 @@ v0.1 的使用者是**一个研究者和其信任的若干 AI 工具**。可以�
 
 ## 5. 最小数据模型
 
-只需要四类业务数据：Project、Node、Relation、Commit。证据嵌在 Node 中；不单独建设 Experiment 平台。数据库中的技术迁移表不算新增产品模块。
+只需要五类业务数据：Project、Node、Relation、Commit 与 ResearchVersion（E 批 §0.2 增补）。证据嵌在 Node 中；不单独建设 Experiment 平台。数据库中的技术迁移表不算新增产品模块。
 
 ### 5.1 Project
 
@@ -239,6 +239,7 @@ v0.1 的使用者是**一个研究者和其信任的若干 AI 工具**。可以�
 | `details_md` | 0–30000 字符 |
 | `tags` | 最多 10 个，每个 1–32 字符，去重 |
 | `evidence` | 最多 20 条，默认空数组 |
+| `version_ids` | 科研版本归属（只读派生自 5.5 关联表）；创建时可带，update 经 fields.version_ids 整组替换 |
 | `archived` | 默认 false；归档通过专门操作 |
 | `created_at` / `updated_at` | 服务器时间 |
 | `created_by` / `updated_by` | 服务器根据认证令牌确定 |
@@ -269,6 +270,15 @@ v0.1 的使用者是**一个研究者和其信任的若干 AI 工具**。可以�
 
 `Node`、`Relation` 的结构不带当前用户的折叠/选择/视野。业务内容、修改历史、浏览视图是三种不同信息，不能混在一起。
 
+### 5.5 ResearchVersion（科研版本）
+
+科研版本（v1、v2、v3……）是研究方案的阶段标签，不是保存记录号（revision）。二者完全无关：每次保存都会使 revision +1，而科研版本只随方案推进增减。界面上保存编号统一显示「记录 #N」，避免与 v1/v2 混淆。
+
+- `research_versions`：`id: UUID`、`project_id`、`name`（1–80，非空白）、`order_index`、`description`（≤500）、`archived`、创建/更新时间与作者。
+- `node_version_assignments`：`(node_id, version_id)` 多对多关联，同节点可属多个版本；节点上的 `version_ids` 字段是这只读的派生视图。
+- 呈现序号 = `order_index + 1`（第一轮 v1、第二轮 v2）。
+- 无时间旅行：版本是给当前内容打的标签，不用于按保存时点回看历史（已显式裁剪，见 DECISIONS 裁剪记录）。
+
 ## 6. 写入协议：一次提交一个小变化，而不是覆盖全图
 
 浏览器编辑和 AI 写入必须调用同一套后端业务逻辑。浏览器的一次保存可以只有一条操作；AI 的一次研究增量可以有多条操作。
@@ -292,8 +302,8 @@ v0.1 的使用者是**一个研究者和其信任的若干 AI 工具**。可以�
 | op | 必要参数与语义 |
 | --- | --- |
 | `project.update` | `fields` 仅允许 name、objective |
-| `node.create` | `id`、`parent_id`、`title`，其余内容字段可选；可选 after_id |
-| `node.update` | `id`、`fields`；只能改 kind、title、summary、status、四个短字段、details_md、tags、evidence |
+| `node.create` | `id`、`parent_id`、`title`，其余内容字段可选；可选 after_id；可选 `version_ids: [uuid]`（缺省 = 无归属） |
+| `node.update` | `id`、`fields`；只能改 kind、title、summary、status、四个短字段、details_md、tags、evidence；`fields.version_ids` 可选——显式数组 = 整组替换，省略 = 不动；引用的版本必须存在且未归档，否则 422 |
 | `node.move` | `id`、`parent_id`；可选 after_id，不能导致主树成环 |
 | `node.archive` | `id`、`reason`；仅允许叶节点 |
 | `node.restore` | `id`、`reason`；父节点必须有效 |
@@ -301,6 +311,9 @@ v0.1 的使用者是**一个研究者和其信任的若干 AI 工具**。可以�
 | `relation.update` | `id`、`fields`；只改 kind、reason |
 | `relation.archive` | `id`、`reason` |
 | `relation.restore` | `id`、`reason`；两端必须未归档 |
+| `version.create` | `id`、`name`（1–80，非空白）、可选 description（≤500）、可选 after_id（与节点一致的省略=追加/ null=最前/ UUID=其后） |
+| `version.update` | `id`、`fields` 只允许 name、description |
+| `version.archive` | `id`、`reason`；已挂该版本的节点保留归属，但节点不能再引用已归档版本（update 校验拒绝） |
 
 创建和移动时，after_id 缺省表示追加到同级最后；显式 null 表示最前；UUID 表示放到该有效同级节点之后。不能指定自己。服务器负责生成/重排 order_index。
 
@@ -356,6 +369,10 @@ update 是局部字段更新：未提供的字段保持不变；清空字符串�
 | `GET /projects/{p}/commits/{c}` | 单次提交详情与 before/after |
 | `POST /projects/{p}/commits` | 统一写入；支持 dry_run |
 | `GET /projects/{p}/export` | 完整逻辑 JSON 导出，含归档记录和历史 |
+| `GET /projects/{p}/versions` | 科研版本列表（含已归档，按 order_index 排序） |
+| `POST /projects/{p}/attachments` | 受管图片上传（multipart，单文件 ≤10MB），sha256 幂等 |
+| `GET /projects/{p}/attachments` | 附件元数据列表（staged 与 attached） |
+| `GET /attachments/{id}` | 附件字节流（ETag = sha256；staged 附件仅属主项目可读） |
 
 所有读取结果应明确对应哪个 revision。一次 context/graph/export 中的数据从同一个一致读取快照获取，不把几次不同版本查询拼在一起。
 
@@ -449,7 +466,7 @@ Markdown 禁用原始 HTML 和脚本，只允许安全链接；禁用自动加�
 
 ### 备份、导出与恢复
 
-必须提供完整项目 JSON 导出，包含 schema_version=2、导出时 revision、节点、关系、历史和附件元数据（id/mime/sha256/尺寸等；**图片字节不入 JSON**，随备份包走）。它是便携数据档案，不宣称 v0.1 已支持任意 JSON 合并导入。
+必须提供完整项目 JSON 导出，包含 schema_version=3、导出时 revision、节点、关系、历史、附件元数据（id/mime/sha256/尺寸等；**图片字节不入 JSON**，随备份包走），以及科研版本 `versions` 全量数组与 `node_version_assignments` 归属数组。它是便携数据档案，不宣称 v0.1 已支持任意 JSON 合并导入。
 
 必须提供离线管理命令进行数据库快照备份，调用 SQLite 在线备份能力生成一致快照。不能在运行中仅复制 `.db` 并假设 WAL 中的修改都已经包含。[S6]
 
@@ -460,6 +477,12 @@ Markdown 禁用原始 HTML 和脚本，只允许安全链接；禁用自动加�
 ### 9.1 受管图片附件
 
 正文以纯 Markdown 源引用附件（`![alt](attachment:<uuid>)`），复制/导出/搜索全部可用。上传走 `POST /api/v1/projects/{pid}/attachments`（multipart，单文件 ≤10MB、Pillow 探尺寸 ≤8000px、必须 image/*），入库为 `staged`；提交事务内扫描 node.create/node.update 的 details_md 与 evidence 引用，同事务翻转为 `attached`。`GET /api/v1/attachments/{id}` 经认证供给字节流（ETag=sha256）；`GET /api/v1/projects/{pid}/attachments` 列元数据。attached 永不删（替换=新 id），staged 且无引用超 30 天在上传事务顺带清理。字节落 `RESEARCHMAP_STORAGE`（默认 `<db dir>/attachments`）。
+
+### 9.2 科研版本与泳道
+
+科研版本是给当前内容打的阶段标签（v1/v2 显示序号 = `order_index + 1`），与保存记录号 revision 无关；界面统一显示「记录 #N」。**筛选语义**：选中某版本后的可见集 = 归属该版本的节点 ∪ 其祖先链闭包（缺失的祖先作为「上下文路径」显示，孤儿跳过规则不变）；选中的节点若被筛掉，详情面板给出「当前视图外」提示与「清除筛选并显示」入口。筛选态存于项目级浏览偏好，跨布局（横向树/纵向树/大纲/泳道）共享，刷新后保留；「展开全部」等工具按当前筛选范围计数。
+
+**泳道布局**：列 = 科研版本（按 order_index）+「未分配」伪列置尾；行 = 一级线路；单元格内节点按 (order_index, id) 全局序以固定步进纵向堆叠。同 (节点集、版本表、顺序) ⇒ 同坐标，确定性契约与主树一致。泳道是全量在筛人口的网格：树边不画、折叠/聚焦分支有意忽略，关系线作为选中覆盖层照常显示。多版本节点只显示其首个归属列（独立展示实例裁剪，见 DECISIONS）。
 
 ## 10. 验收测试：这些比“页面能打开”更重要
 
@@ -494,6 +517,8 @@ Markdown 禁用原始 HTML 和脚本，只允许安全链接；禁用自动加�
 | T25 | 重建容器和快照恢复 | 数据、关系、历史可恢复；外部证据文件不被谎称已备份 |
 | T26 | CLI 新 AI 接手、读取局部、提交、重试 | 能完成闭环，错误可机器解析，不要求模型 API Key |
 | T27 | 大图、两种桌面视口、长中文和多关联 | 概览不全展开；标题可读、侧栏可用，不被大量线遮蔽 |
+| T28 | 上传图片→引用入正文→保存；取消草稿不保存 | attached 翻转仅发生在提交事务内；取消后无翻转，staged 由 GC 兜底；重登可加载图片 |
+| T29 | 筛选科研版本后切布局、刷新、重复布局 | 筛选保留；同节点集版本表出同坐标；被筛掉的选中节点有「视图外」提示 |
 
 测试分工：后端自动化覆盖事务、状态校验、幂等、冲突和权限；前端单元测试覆盖布局确定性、可见集和关联显示规则；浏览器端到端测试覆盖编辑、刷新、搜索定位、折叠和跨关系。
 
