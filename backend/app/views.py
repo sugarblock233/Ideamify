@@ -27,7 +27,16 @@ from .config import MAX_BODY_BYTES
 from .db import read_session
 from .db import write_txn as _write_txn
 from .errors import AppError, err, not_found
-from .models import Attachment, Commit, CommitNode, Node, Project, Relation
+from .models import (
+    Attachment,
+    Commit,
+    CommitNode,
+    Node,
+    NodeVersionAssignment,
+    Project,
+    Relation,
+    ResearchVersion,
+)
 from .service import create_project, safe_sql_op, submit_commit
 
 router = APIRouter(prefix="/api/v1", tags=["researchmap"], dependencies=[Depends(require_auth)])
@@ -98,16 +107,49 @@ def node_path(nodes: dict[str, Node], node: Node) -> list[dict]:
              "archived": bool(n.archived)} for n in chain]
 
 
-def node_full(n: Node) -> dict:
+def node_full(n: Node, version_ids: list[str] | None = None) -> dict:
     return {
         "id": n.id, "parent_id": n.parent_id, "order_index": n.order_index,
         "kind": n.kind, "title": n.title, "summary": n.summary, "status": n.status,
         "rationale": n.rationale, "finding": n.finding, "decision": n.decision,
         "scope": n.scope, "details_md": n.details_md,
-        "tags": _lj(n.tags), "evidence": _lj(n.evidence), "archived": bool(n.archived),
+        "tags": _lj(n.tags), "evidence": _lj(n.evidence),
+        "version_ids": version_ids if version_ids is not None else [],
+        "archived": bool(n.archived),
         "created_at": n.created_at, "updated_at": n.updated_at,
         "created_by": n.created_by, "updated_by": n.updated_by,
     }
+
+
+def _version_rows(s, pid: str) -> list[ResearchVersion]:
+    """项目内全部科研版本，按展示顺序（order_index, created_at, id）。"""
+    vs = list(s.scalars(select(ResearchVersion)
+                        .where(ResearchVersion.project_id == pid)).all())
+    vs.sort(key=lambda v: (v.order_index, v.created_at, v.id))
+    return vs
+
+
+def _assignment_map(s, pid: str) -> dict[str, list[str]]:
+    """node_id → 该节点归属的版本 id 列表（按版本展示顺序）。"""
+    rows = s.execute(
+        select(NodeVersionAssignment.node_id, ResearchVersion.order_index,
+               ResearchVersion.created_at, ResearchVersion.id)
+        .join(ResearchVersion, ResearchVersion.id == NodeVersionAssignment.version_id)
+        .where(NodeVersionAssignment.project_id == pid)
+        .order_by(ResearchVersion.order_index, ResearchVersion.created_at,
+                  ResearchVersion.id)
+    ).all()
+    m: dict[str, list[str]] = {}
+    for row in rows:
+        m.setdefault(row[0], []).append(row[3])
+    return m
+
+
+def _version_records(vs: list[ResearchVersion]) -> list[dict]:
+    return [{"id": v.id, "name": v.name, "order_index": v.order_index,
+             "description": v.description, "archived": bool(v.archived),
+             "created_at": v.created_at, "updated_at": v.updated_at}
+            for v in vs]
 
 
 def _get_project_row(s, pid: str) -> Project:
@@ -212,17 +254,23 @@ def get_graph(pid: str, include_archived: bool = False) -> dict:
                 rel_count[r.target_id] = rel_count.get(r.target_id, 0) + 1
         nodes = sorted(nodes, key=lambda n: (0 if n.parent_id is None else 1,
                                              n.order_index, n.id))
+        # E 批 §7：科研版本列表 + 每节点归属（响应根部的 versions 与节点行
+        # version_ids 属于同一快照）
+        versions = _version_rows(s, pid)
+        assigns = _assignment_map(s, pid)
         return {
             "project_revision": p.revision,
             "project": {"id": p.id, "name": p.name, "objective": p.objective,
                         "created_at": p.created_at, "updated_at": p.updated_at,
                         "created_by": p.created_by},
+            "versions": _version_records(versions),
             "nodes": [{
                 "id": n.id, "parent_id": n.parent_id, "order_index": n.order_index,
                 "kind": n.kind, "title": n.title, "summary": n.summary, "status": n.status,
                 "tags": _lj(n.tags), "evidence_count": len(_lj(n.evidence) or []),
                 "child_count": child_count.get(n.id, 0),
                 "relation_count": rel_count.get(n.id, 0),
+                "version_ids": assigns.get(n.id, []),
                 "archived": bool(n.archived),
                 "created_at": n.created_at, "updated_at": n.updated_at,
                 "created_by": n.created_by,
@@ -245,7 +293,7 @@ def get_node(pid: str, nid: str) -> dict:
         rel_count = s.execute(select(func.count(Relation.id)).where(
             Relation.project_id == pid, Relation.archived.is_(False),
             (Relation.source_id == nid) | (Relation.target_id == nid))).scalar_one()
-        full = node_full(n)
+        full = node_full(n, _assignment_map(s, pid).get(nid, []))
         full["project_revision"] = p.revision
         full["path"] = node_path(all_nodes, n)
         full["relation_count"] = rel_count
@@ -478,14 +526,18 @@ def export_project(pid: str) -> dict:
         # D4: 附件元数据随导出（字节文件不入 JSON 导出——进备份包，见 docs/DECISIONS §18）
         atts = list(s.scalars(select(Attachment).where(Attachment.project_id == pid)
                               .order_by(Attachment.created_at, Attachment.id)).all())
+        # E 批：科研版本与归属随导出（schema_version 2→3）
+        versions = _version_rows(s, pid)
+        assigns = _assignment_map(s, pid)
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "exported_at": now_utc(),
             "project_revision": p.revision,
             "project": {"id": p.id, "name": p.name, "objective": p.objective,
                         "revision": p.revision, "created_at": p.created_at,
                         "updated_at": p.updated_at, "created_by": p.created_by},
-            "nodes": [node_full(n) | {"project_id": pid} for n in nodes],
+            "nodes": [node_full(n, assigns.get(n.id, [])) | {"project_id": pid}
+                      for n in nodes],
             "relations": [
                 {"id": r.id, "project_id": pid, "source_id": r.source_id,
                  "target_id": r.target_id, "kind": r.kind, "reason": r.reason,
@@ -500,6 +552,13 @@ def export_project(pid: str) -> dict:
                  "operations": _lj(c.operations_json), "changes": _lj(c.changes_json)}
                 for c in commits],
             "attachments": [_att_record(a) for a in atts],
+            "versions": [{"id": v.id, "name": v.name, "order_index": v.order_index,
+                          "description": v.description, "archived": bool(v.archived),
+                          "created_at": v.created_at, "updated_at": v.updated_at,
+                          "created_by": v.created_by} for v in versions],
+            "node_version_assignments": [
+                {"node_id": nid, "version_id": vid, "project_id": pid}
+                for nid, vids in sorted(assigns.items()) for vid in vids],
             "counts": {
                 "nodes": len(nodes),
                 "nodes_archived": sum(1 for n in nodes if n.archived),
@@ -507,6 +566,7 @@ def export_project(pid: str) -> dict:
                 "relations_archived": sum(1 for r in rels if r.archived),
                 "commits": len(commits),
                 "attachments": len(atts),
+                "versions": len(versions),
                 },
         }
 

@@ -256,11 +256,11 @@ check("commit detail has operations + changes + node links",
 # ---------------- export -----------------------------------------------------
 r = c.get(f"/api/v1/projects/{pid}/export")
 e = r.json()
-ok = (e["schema_version"] == 2 and len(e["nodes"]) == 5 and len(e["relations"]) == 1
+ok = (e["schema_version"] == 3 and len(e["nodes"]) == 5 and len(e["relations"]) == 1
       and e["counts"]["commits"] == 7
       and all("details_md" in n for n in e["nodes"])
       and any(n["id"] == child and not n["archived"] for n in e["nodes"]))
-check("export: schema v2, full content, relations, full history", ok, str(list(e.keys())))
+check("export: schema v3, full content, relations, full history", ok, str(list(e.keys())))
 
 # ---------------- context ----------------------------------------------------
 r = c.get(f"/api/v1/projects/{pid}/context", params={"focus_node_id": third, "max_chars": 16000})
@@ -765,8 +765,8 @@ check("attachment referenced via node.update.fields flipped too", st.get(att2["i
 # D4: 导出含附件元数据（字节不入 JSON 导出）
 e2 = c.get(f"/api/v1/projects/{pid}/export").json()
 row = next((a for a in e2.get("attachments", []) if a["id"] == att["id"]), None)
-check("export schema v2 carries attachment metadata (sha256/state, no bytes)",
-      e2["schema_version"] == 2 and row is not None and row["state"] == "attached"
+check("export schema v3 carries attachment metadata (sha256/state, no bytes)",
+      e2["schema_version"] == 3 and row is not None and row["state"] == "attached"
       and row["sha256"] == att["sha256"] and "data" not in row
       and e2["counts"]["attachments"] == len(e2["attachments"]), str(e2.get("counts")))
 
@@ -793,6 +793,91 @@ r = cm.post(f"/api/v1/projects/{pid}/attachments",
            files={"file": ("fat.png", _blob_png(0), "image/png")})
 check(">10MB attachment -> 413 REQUEST_TOO_LARGE (路由内校验)",
       r.status_code == 413 and r.json()["error"]["code"] == "REQUEST_TOO_LARGE", r.text[:150])
+
+# ---------------- E 批: research versions（ops / 分配 / 409 幂等继承 / v3 导出） ----
+pv = c.post("/api/v1/projects", json={"request_id": U(), "name": "科研版本冒烟",
+            "objective": "版本 ops、节点归属与归档语义（合成数据）"}).json()["id"]
+v1, v2, v3 = U(), U(), U()
+n_a = U()
+r = commit_to(pv, [
+    {"op": "version.create", "id": v1, "name": "第一轮", "description": "初始探索"},
+    {"op": "version.create", "id": v2, "name": "第二轮"},
+    {"op": "node.create", "id": n_a, "kind": "idea", "title": "带版本的想法",
+     "summary": "创建时归属 v1/v2", "version_ids": [v1, v2]},
+], 0)
+check("version.create x2 + node.create with version_ids -> 200",
+      r.status_code == 200 and r.json()["created_version_ids"] == [v1, v2]
+      and r.json()["revision"] == 1, r.text[:300])
+rev = 1
+
+r = commit_to(pv, [{"op": "version.create", "id": v3, "name": "补录轮", "after_id": v1}], rev)
+rev += 1
+g = c.get(f"/api/v1/projects/{pv}/graph").json()
+check("graph versions sorted by after_id + node version_ids in display order",
+      r.status_code == 200 and [v["id"] for v in g["versions"]] == [v1, v3, v2]
+      and next(n for n in g["nodes"] if n["id"] == n_a)["version_ids"] == [v1, v2], r.text[:200])
+
+r = commit_to(pv, [{"op": "node.update", "id": n_a, "fields": {"version_ids": [v2]}}], rev)
+rev += 1
+full = c.get(f"/api/v1/projects/{pv}/nodes/{n_a}").json()
+check("node.update version_ids replaces whole set (v1+v2 -> [v2])",
+      r.status_code == 200 and full["version_ids"] == [v2], r.text[:200])
+
+n_bad = U()
+r = commit_to(pv, [
+    {"op": "node.create", "id": n_bad, "kind": "idea", "title": "合法的同批节点",
+     "summary": "这条本身合法"},
+    {"op": "node.create", "id": U(), "kind": "idea", "title": "x", "summary": "x",
+     "version_ids": [U()]},
+], rev)
+rev_now = c.get(f"/api/v1/projects/{pv}").json()["revision"]
+check("unknown version in batch -> 422 INVALID_VERSION + all-or-nothing",
+      r.status_code == 422 and r.json()["error"]["code"] == "INVALID_VERSION"
+      and rev_now == rev, r.text[:200])
+
+r = commit_to(pv, [{"op": "version.archive", "id": v3, "reason": "废弃该阶段"}], rev)
+rev += 1
+g2 = c.get(f"/api/v1/projects/{pv}/graph").json()
+check("version.archive -> archived flag in graph versions",
+      r.status_code == 200 and r.json()["archived_version_ids"] == [v3]
+      and next(v for v in g2["versions"] if v["id"] == v3)["archived"] is True, r.text[:200])
+r = commit_to(pv, [{"op": "node.update", "id": n_a, "fields": {"version_ids": [v3]}}], rev)
+check("assigning archived version -> 422 VERSION_ARCHIVED",
+      r.status_code == 422 and r.json()["error"]["code"] == "VERSION_ARCHIVED", r.text[:200])
+
+n_c = U()
+r = commit_to(pv, [{"op": "node.create", "id": n_c, "kind": "idea",
+                    "title": "无版本节点", "summary": "省略 version_ids"}], rev)
+rev += 1
+check("node.create without version_ids assigns nothing",
+      r.status_code == 200
+      and c.get(f"/api/v1/projects/{pv}/nodes/{n_c}").json()["version_ids"] == [], r.text[:200])
+
+rid_v = U()
+ops_v = [{"op": "version.update", "id": v2, "fields": {"description": "改述第二轮"}}]
+r = commit_to(pv, ops_v, rev, rid=rid_v, summary="版本改述")
+check("version.update -> 200", r.status_code == 200, r.text[:200])
+r2 = commit_to(pv, ops_v, rev, rid=rid_v, summary="版本改述")
+check("version commit replay idempotent (same rid+hash)",
+      r2.status_code == 200 and r2.json().get("already_committed") is True
+      and c.get(f"/api/v1/projects/{pv}").json()["revision"] == rev + 1, r2.text[:200])
+rev += 1
+r = commit_to(pv, ops_v, rev - 1)
+check("version commit stale revision -> 409 REVISION_CONFLICT",
+      r.status_code == 409 and r.json()["error"]["code"] == "REVISION_CONFLICT", r.text[:200])
+
+ev = c.get(f"/api/v1/projects/{pv}/export").json()
+assigns = {(a["node_id"], a["version_id"]) for a in ev.get("node_version_assignments", [])}
+check("export v3 carries versions + node_version_assignments",
+      ev["schema_version"] == 3 and len(ev["versions"]) == 3
+      and ev["counts"]["versions"] == 3 and (n_a, v2) in assigns, str(ev.get("counts")))
+
+ctx = c.get(f"/api/v1/projects/{pv}/context", params={"max_chars": 8000}).json()
+route = next((x for x in ctx.get("routes", []) if x["id"] == n_a), None)
+# 标签是展示序号（v1/v2/v3 = 版本顺序，非版本 id）：补录轮插在第一轮之后，
+# 第二轮顺延为第 3 位，n_a 归属第二轮 ⇒ 标签 "v3"。
+check("context routes tag node with version label",
+      route is not None and route.get("versions") == "v3", str(ctx.get("routes"))[:200])
 
 c.close(); try_ai.close()
 fails = [n for n, okp in results if not okp]

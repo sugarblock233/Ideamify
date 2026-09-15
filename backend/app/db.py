@@ -208,11 +208,42 @@ def _migrate_0002(conn) -> None:
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_attachments_sha ON attachments(project_id, sha256)"))
 
 
+def _migrate_0003(conn) -> None:
+    # 科研版本（E 批 §7）：版本是给当前内容打的阶段标签（v1/v2/v3…），与保存
+    # revision（project.revision「记录 #N」）完全无关；只呈现，不做时间旅行。
+    # 多对多：同一节点可属多个版本（统计按 node id 去重）。
+    conn.execute(text("""
+    CREATE TABLE IF NOT EXISTS research_versions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      archived INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_versions_project ON research_versions(project_id)"))
+    conn.execute(text("""
+    CREATE TABLE IF NOT EXISTS node_version_assignments (
+      node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+      version_id TEXT NOT NULL REFERENCES research_versions(id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL,
+      PRIMARY KEY (node_id, version_id)
+    )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_nva_project ON node_version_assignments(project_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_nva_version ON node_version_assignments(version_id)"))
+
+
 MIGRATIONS: list[tuple[int, str]] = [
     (1, "initial schema (projects/nodes/relations/commits/commit_nodes)"),
     (2, "managed attachments (staged/attached, D 批 §9.2)"),
+    (3, "research versions + node assignments (E 批 §7)"),
 ]
-_APPLY = {1: _migrate_0001, 2: _migrate_0002}
+_APPLY = {1: _migrate_0001, 2: _migrate_0002, 3: _migrate_0003}
 
 
 def init_db() -> None:

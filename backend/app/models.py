@@ -122,3 +122,31 @@ class Attachment(Base):
     state: Mapped[str] = mapped_column(String(16))
     created_by: Mapped[str] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
+
+
+class ResearchVersion(Base):
+    """科研版本标签（E 批 §7.2）：v1/v2/v3 这类研究阶段标签，只呈现当前内容的
+    归属，不承载时间旅行。order_index 决定展示顺序（与创建顺序一致，after_id
+    调整）；archived 版本不再参与分配，但既有归属保留（历史可读）。"""
+
+    __tablename__ = "research_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text, index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    description: Mapped[str] = mapped_column(Text, default="")
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+
+
+class NodeVersionAssignment(Base):
+    """node ↔ research_version 多对多（同一节点可属多个版本）。"""
+
+    __tablename__ = "node_version_assignments"
+
+    node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    version_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    project_id: Mapped[str] = mapped_column(Text, index=True)

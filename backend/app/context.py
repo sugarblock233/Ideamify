@@ -50,7 +50,7 @@ from sqlalchemy import select
 
 from .db import read_session
 from .errors import AppError, not_found
-from .models import Commit, CommitNode, Node, Project, Relation
+from .models import Commit, CommitNode, Node, NodeVersionAssignment, Project, Relation, ResearchVersion
 
 MIN_CHARS = 4000
 MAX_CHARS = 50000
@@ -179,6 +179,18 @@ def build_context(pid: str, focus_node_id: Optional[str], q: Optional[str],
         all_nodes = list(s.scalars(select(Node).where(Node.project_id == pid)).all())
         active = {n.id: n for n in all_nodes if not n.archived}
         by_all = {n.id: n for n in all_nodes}
+
+        # E 批 §7：科研版本归属 → node_id → [展示序号 v1, v2, …]
+        versions = list(s.scalars(select(ResearchVersion)
+                                  .where(ResearchVersion.project_id == pid)).all())
+        versions.sort(key=lambda v: (v.order_index, v.created_at, v.id))
+        v_order = {v.id: i + 1 for i, v in enumerate(versions)}
+        node_versions: dict[str, list[int]] = {}
+        for nid, vid in s.execute(
+                select(NodeVersionAssignment.node_id, NodeVersionAssignment.version_id)
+                .where(NodeVersionAssignment.project_id == pid)).all():
+            if vid in v_order:
+                node_versions.setdefault(nid, []).append(v_order[vid])
 
         focus: Optional[Node] = None
         if focus_node_id:
@@ -351,7 +363,16 @@ def build_context(pid: str, focus_node_id: Optional[str], q: Optional[str],
         else:
             top = sorted((n for n in active.values() if n.parent_id is None),
                          key=lambda n: (n.order_index, n.id))
-            fill("routes", [ctx.brief(n) for n in top])
+            # E 批 §7：路线条目带科研版本标签（v1/v2…，按版本展示顺序）；
+            # 整条条目仍走 admit()——标签放不下时随条目一起省略。
+            route_items = []
+            for n in top:
+                d = ctx.brief(n)
+                vids = sorted(node_versions.get(n.id, []))
+                if vids:
+                    d["versions"] = "、".join(f"v{i}" for i in vids)
+                route_items.append(d)
+            fill("routes", route_items)
             top_ids = {t.id for t in top}
             open_items = [ctx.brief(n) for n in active.values()
                           if n.status in ("in_progress", "unexplored")

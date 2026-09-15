@@ -137,6 +137,13 @@ class OpNodeCreate(NodeContentShapes):
     id: NodeId
     parent_id: OptionalNodeId = None
     after_id: OptionalNodeId = None
+    # E 批 §7：科研版本归属；省略 = 不分配（空数组也是显式的空分配）
+    version_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("version_ids")
+    @classmethod
+    def _v_version_ids(cls, v: list[str]) -> list[str]:
+        return _check_version_ids(v)
 
     @field_validator("id")
     @classmethod
@@ -162,6 +169,13 @@ class NodeUpdateFields(NodeContentShapes):
     # Partial update (SPEC 6.3): every content field is optional; only
     # explicitly supplied fields are applied by the commit engine.
     title: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    # E 批 §7：显式数组 = 整组替换；省略（或显式 null）= 不动既有归属
+    version_ids: Optional[list[str]] = Field(default=None)
+
+    @field_validator("version_ids")
+    @classmethod
+    def _v_version_ids(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        return None if v is None else _check_version_ids(v)
 
 
 class OpNodeUpdate(StrictModel):
@@ -230,6 +244,88 @@ class OpNodeRestore(StrictModel):
     @classmethod
     def _v_id(cls, v: str) -> str:
         return _validate_uuid(v, "node.id")
+
+
+# ---------------------------------------------------------------------------
+# version operations（E 批 §7：科研版本 ≠ 保存 revision）
+# ---------------------------------------------------------------------------
+
+def _check_version_ids(v: list[str]) -> list[str]:
+    out: list[str] = []
+    for x in v:
+        vid = _validate_uuid(x, "version_ids[]")
+        if vid not in out:
+            out.append(vid)
+    return out
+
+
+class VersionCreate(StrictModel):
+    op: Literal["version.create"]
+    id: NodeId
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=500)
+    after_id: Optional[NodeId] = None
+
+    @field_validator("id")
+    @classmethod
+    def _v_id(cls, v: str) -> str:
+        return _validate_uuid(v, "version.id")
+
+    @field_validator("name")
+    @classmethod
+    def _v_name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("version.name 不能为空白")
+        return v
+
+    @field_validator("after_id")
+    @classmethod
+    def _v_after(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _validate_uuid(v, "after_id")
+
+    @property
+    def after_id_set(self) -> bool:
+        return "after_id" in self.model_fields_set
+
+
+class VersionUpdateFields(StrictModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def _v_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("version.name 不能为空白")
+        return v
+
+    @model_validator(mode="after")
+    def _not_empty(self):
+        if not self.model_fields_set:
+            raise ValueError("version.update.fields 至少包含 name 或 description")
+        return self
+
+
+class OpVersionUpdate(StrictModel):
+    op: Literal["version.update"]
+    id: NodeId
+    fields: VersionUpdateFields
+
+    @field_validator("id")
+    @classmethod
+    def _v_id(cls, v: str) -> str:
+        return _validate_uuid(v, "version.id")
+
+
+class OpVersionArchive(StrictModel):
+    op: Literal["version.archive"]
+    id: NodeId
+    reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("id")
+    @classmethod
+    def _v_id(cls, v: str) -> str:
+        return _validate_uuid(v, "version.id")
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +412,9 @@ Operation = Annotated[
         OpRelationUpdate,
         OpRelationArchive,
         OpRelationRestore,
+        VersionCreate,
+        OpVersionUpdate,
+        OpVersionArchive,
     ],
     Field(discriminator="op"),
 ]

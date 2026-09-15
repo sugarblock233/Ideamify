@@ -18,11 +18,20 @@ import uuid
 import sqlalchemy.exc
 import sqlite3
 from pydantic import ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 
 from .db import Session, now_utc, read_session, write_txn
 from .errors import AppError, conflict, db_busy, err, invalid, not_found
-from .models import Attachment, Commit, CommitNode, Node, Project, Relation
+from .models import (
+    Attachment,
+    Commit,
+    CommitNode,
+    Node,
+    NodeVersionAssignment,
+    Project,
+    Relation,
+    ResearchVersion,
+)
 from .schemas import (
     CONFIRMED_STATUSES,
     CommitRequest,
@@ -36,7 +45,10 @@ from .schemas import (
     OpRelationCreate,
     OpRelationRestore,
     OpRelationUpdate,
+    OpVersionArchive,
+    OpVersionUpdate,
     ProjectCreate,
+    VersionCreate,
 )
 
 MAX_DEPTH = 64
@@ -102,6 +114,33 @@ def _get_relation(s: Session, pid: str, rid: str) -> Relation:
     if r is None or r.project_id != pid:
         raise not_found(f"关系 {rid} 不存在或不属于当前项目")
     return r
+
+
+def _get_version(s: Session, pid: str, vid: str) -> ResearchVersion:
+    v = s.get(ResearchVersion, vid)
+    if v is None or v.project_id != pid:
+        raise not_found(f"科研版本 {vid} 不存在或不属于当前项目")
+    return v
+
+
+def _validate_node_versions(s: Session, pid: str, vids: list[str], idx: int) -> None:
+    """分配的每个版本都必须存在于本项目且未归档（E 批 §7.3）。"""
+    for vid in vids:
+        v = s.get(ResearchVersion, vid)
+        if v is None or v.project_id != pid:
+            raise invalid(f"科研版本 {vid} 不存在或不属于当前项目",
+                          code="INVALID_VERSION", operation_index=idx)
+        if v.archived:
+            raise invalid(f"科研版本 {vid} 已归档，不能继续分配节点",
+                          code="VERSION_ARCHIVED", operation_index=idx)
+
+
+def _set_node_versions(s: Session, pid: str, node_id: str, vids: list[str]) -> None:
+    """整组替换归属（显式数组语义）；调用方已验证版本合法。"""
+    s.execute(delete(NodeVersionAssignment)
+              .where(NodeVersionAssignment.node_id == node_id))
+    for vid in vids:
+        s.add(NodeVersionAssignment(node_id=node_id, version_id=vid, project_id=pid))
 
 
 def _is_ancestor(s: Session, ancestor_id: str, node_id: str) -> bool:
@@ -182,7 +221,20 @@ def _check_confirmed(status: str, scope: str, finding: str, decision: str, evide
     return missing
 
 
-def _snap(node: Node) -> dict:
+def _node_version_ids(s: Session, node_id: str) -> list[str]:
+    """节点当前归属的版本 id，按版本展示顺序（order_index…）排序。"""
+    rows = s.execute(
+        select(ResearchVersion.id)
+        .join(NodeVersionAssignment,
+              NodeVersionAssignment.version_id == ResearchVersion.id)
+        .where(NodeVersionAssignment.node_id == node_id)
+        .order_by(ResearchVersion.order_index, ResearchVersion.created_at,
+                  ResearchVersion.id)
+    ).scalars().all()
+    return list(rows)
+
+
+def _snap(node: Node, s: Session | None = None) -> dict:
     d = {
         "id": node.id, "parent_id": node.parent_id, "order_index": node.order_index,
         "kind": node.kind, "title": node.title, "summary": node.summary,
@@ -191,6 +243,7 @@ def _snap(node: Node) -> dict:
         "details_md": node.details_md if len(node.details_md) <= _CHANGES_DETAIL_MD_CAP
         else node.details_md[:_CHANGES_DETAIL_MD_CAP] + f"…[余 {len(node.details_md) - _CHANGES_DETAIL_MD_CAP} 字]",
         "tags": _lj(node.tags), "evidence": _lj(node.evidence),
+        "version_ids": _node_version_ids(s, node.id) if s is not None else [],
         "archived": bool(node.archived),
     }
     return d
@@ -221,6 +274,9 @@ class Plan:
         self.updated_relation_ids: list[str] = []
         self.archived_relation_ids: list[str] = []
         self.restored_relation_ids: list[str] = []
+        self.created_version_ids: list[str] = []
+        self.updated_version_ids: list[str] = []
+        self.archived_version_ids: list[str] = []
         self.node_ids: set[str] = set()
         self.warnings: list[str] = []
 
@@ -310,6 +366,9 @@ def op_node_create(plan: Plan, op: OpNodeCreate, idx: int) -> None:
             f"状态为 {'受支持' if op.status == 'supported' else '不支持'} 时，scope/finding/decision 必须非空且至少一条证据",
             code="STATUS_EVIDENCE_REQUIRED", operation_index=idx, missing=missing)
 
+    # E 批 §7：科研版本归属校验（存在、未归档）
+    _validate_node_versions(s, pid, op.version_ids, idx)
+
     mode = _resolve_after(op, op.id, parent, idx, plan)
     now = now_utc()
     node = Node(
@@ -329,9 +388,12 @@ def op_node_create(plan: Plan, op: OpNodeCreate, idx: int) -> None:
     # the (project_id, order_index) unique index before renumbering.
     _place(s, pid, parent, node, mode, idx, plan)
     plan.s.flush()
+    if op.version_ids:
+        _set_node_versions(s, pid, op.id, op.version_ids)
+        s.flush()
     plan.created_node_ids.append(op.id)
     plan.node("node.create", op.id, "create")
-    plan.changes.append({"type": "node.create", "object_id": op.id, "after": _snap(node)})
+    plan.changes.append({"type": "node.create", "object_id": op.id, "after": _snap(node, s)})
     if not op.summary.strip():
         plan.warnings.append(f"node.create {op.id}: summary 为空")
     if not op.tags:
@@ -341,7 +403,7 @@ def op_node_create(plan: Plan, op: OpNodeCreate, idx: int) -> None:
 def op_node_update(plan: Plan, op: OpNodeUpdate, idx: int) -> None:
     s = plan.s
     node = _get_node(s, plan.project.id, op.id)
-    before = _snap(node)
+    before = _snap(node, s)
     # Explicit nulls treat as not supplied (partial-update semantics); the
     # schema layer already rejects an all-null fields object.
     upd = {k: v for k, v in op.fields.model_dump(mode="json").items()
@@ -374,9 +436,14 @@ def op_node_update(plan: Plan, op: OpNodeUpdate, idx: int) -> None:
         node.tags = _uj(upd["tags"])
     if "evidence" in upd:
         node.evidence = _uj(upd["evidence"])
+    # E 批 §7：显式 version_ids 数组 = 整组替换；省略/显式 null = 不动既有归属
+    if "version_ids" in upd:
+        _validate_node_versions(s, plan.project.id, upd["version_ids"], idx)
+        _set_node_versions(s, plan.project.id, node.id, upd["version_ids"])
+        s.flush()
     node.updated_at = now_utc()
     node.updated_by = plan.actor
-    after = _snap(node)
+    after = _snap(node, s)
     diff = {k: {"before": before[k], "after": after[k]} for k in before if before[k] != after[k]}
     plan.changes.append({"type": "node.update", "object_id": node.id, "changed": diff})
     plan.updated_node_ids.append(node.id)
@@ -405,7 +472,7 @@ def op_node_move(plan: Plan, op: OpNodeMove, idx: int) -> None:
     if depth > MAX_DEPTH:
         raise invalid(f"移动后主树深度超过上限 {MAX_DEPTH}", code="MAX_DEPTH", operation_index=idx)
 
-    before = _snap(node)
+    before = _snap(node, s)
     old_parent = node.parent_id
     new_parent_id = parent.id if parent is not None else None
     mode = _resolve_after(op, node.id, parent, idx, plan)
@@ -436,7 +503,7 @@ def op_node_move(plan: Plan, op: OpNodeMove, idx: int) -> None:
     if node.parent_id != before["parent_id"] or node.order_index != before["order_index"]:
         plan.changes.append({"type": "node.move", "object_id": node.id,
                              "before": {k: before[k] for k in ("parent_id", "order_index")},
-                             "after": {k: _snap(node)[k] for k in ("parent_id", "order_index")}})
+                             "after": {k: _snap(node, s)[k] for k in ("parent_id", "order_index")}})
         if old_parent != new_parent_id:
             plan.moved_node_ids.append(node.id)
     plan.node("node.move", node.id, "move")
@@ -464,7 +531,7 @@ def op_node_archive(plan: Plan, op: OpNodeArchive, idx: int) -> None:
         raise invalid(
             f"节点存在 {len(children)} 个未归档子节点，不能归档；请先移动或归档这些子节点（不提供级联删除）",
             code="ARCHIVE_HAS_CHILDREN", operation_index=idx, child_count=len(children))
-    before = _snap(node)
+    before = _snap(node, s)
     node.archived = True
     node.updated_at = now_utc()
     node.updated_by = plan.actor
@@ -486,7 +553,7 @@ def op_node_restore(plan: Plan, op: OpNodeRestore, idx: int) -> None:
             raise invalid(
                 f"父节点 {node.parent_id} 已归档，不能直接恢复子节点；请先恢复或移动父节点",
                 code="PARENT_ARCHIVED", operation_index=idx)
-    before = _snap(node)
+    before = _snap(node, s)
     node.archived = False
     node.updated_at = now_utc()
     node.updated_by = plan.actor
@@ -634,6 +701,102 @@ def op_relation_restore(plan: Plan, op: OpRelationRestore, idx: int) -> None:
     plan.plan_entries.append({"op": "relation.restore", "object_id": rel.id, "effect": "restore"})
 
 
+# ---------------------------------------------------------------------------
+# version operations（E 批 §7.2；沿用 commit 机制：幂等/409/历史继承）
+# ---------------------------------------------------------------------------
+
+def _version_order(s: Session, pid: str) -> list[ResearchVersion]:
+    vs = list(s.scalars(select(ResearchVersion)
+                        .where(ResearchVersion.project_id == pid)).all())
+    vs.sort(key=lambda v: (v.order_index, v.created_at, v.id))
+    return vs
+
+
+def _version_snap(v: ResearchVersion) -> dict:
+    return {"id": v.id, "project_id": v.project_id, "name": v.name,
+            "order_index": v.order_index, "description": v.description,
+            "archived": bool(v.archived)}
+
+
+def op_version_create(plan: Plan, op: VersionCreate, idx: int) -> None:
+    s = plan.s
+    pid = plan.project.id
+    if s.get(ResearchVersion, op.id) is not None:
+        raise invalid(f"版本 id {op.id} 已存在", code="ID_TAKEN", operation_index=idx)
+    existing = _version_order(s, pid)
+    # after_id 语义与节点一致：省略 → 追加；显式 null → 第一位；UUID → 在其后。
+    # 归档版本也在参照列表里（顺序调整不歧视历史标签）。
+    if not op.after_id_set:
+        pos = len(existing)
+    elif op.after_id is None:
+        pos = 0
+    else:
+        pos = next((i + 1 for i, v in enumerate(existing) if v.id == op.after_id), None)
+        if pos is None:
+            target = s.get(ResearchVersion, op.after_id)
+            if target is None or target.project_id != pid:
+                raise invalid(f"after_id {op.after_id} 不存在或不属于当前项目",
+                              code="INVALID_AFTER", operation_index=idx)
+            raise invalid("after_id 必须指向同一项目内的版本", code="INVALID_AFTER",
+                          operation_index=idx)
+    now = now_utc()
+    v = ResearchVersion(id=op.id, project_id=pid, name=op.name.strip() or op.name,
+                        order_index=pos, description=op.description, archived=False,
+                        created_by=plan.actor, created_at=now, updated_at=now)
+    s.add(v)
+    s.flush()
+    grp = existing[:pos] + [v] + existing[pos:]
+    for i, item in enumerate(grp):
+        item.order_index = i
+    s.flush()
+    plan.created_version_ids.append(op.id)
+    plan.plan_entries.append({"op": "version.create", "object_id": op.id, "effect": "create"})
+    plan.changes.append({"type": "version.create", "object_id": op.id, "after": _version_snap(v)})
+    if not op.name.strip():
+        plan.warnings.append(f"version.create {op.id}: name 为空白")
+
+
+def op_version_update(plan: Plan, op: OpVersionUpdate, idx: int) -> None:
+    s = plan.s
+    v = _get_version(s, plan.project.id, op.id)
+    if v.archived:
+        raise invalid("版本已归档，不能直接修改；如需复活请先取消归档（暂未提供）",
+                      code="VERSION_ARCHIVED", operation_index=idx)
+    before = _version_snap(v)
+    upd = {k: val for k, val in op.fields.model_dump().items() if k in op.fields.model_fields_set}
+    if "name" in upd and upd["name"] is not None:
+        v.name = upd["name"].strip()
+    if "description" in upd and upd["description"] is not None:
+        v.description = upd["description"]
+    v.updated_at = now_utc()
+    plan.changes.append({"type": "version.update", "object_id": v.id,
+                         "before": before, "after": _version_snap(v)})
+    plan.updated_version_ids.append(v.id)
+    plan.plan_entries.append({"op": "version.update", "object_id": v.id, "effect": "update"})
+
+
+def op_version_archive(plan: Plan, op: OpVersionArchive, idx: int) -> None:
+    s = plan.s
+    v = _get_version(s, plan.project.id, op.id)
+    if v.archived:
+        raise invalid("版本已处于归档状态", code="ALREADY_ARCHIVED", operation_index=idx)
+    before = _version_snap(v)
+    v.archived = True
+    v.updated_at = now_utc()
+    # 已有归属保留（历史呈现），只是不再参与新分配——不级联清空。
+    n_assigned = s.execute(
+        select(func.count())
+        .select_from(NodeVersionAssignment)
+        .where(NodeVersionAssignment.version_id == v.id)).scalar_one()
+    plan.changes.append({"type": "version.archive", "object_id": v.id,
+                         "before": before, "after": _version_snap(v), "reason": op.reason})
+    plan.archived_version_ids.append(v.id)
+    plan.plan_entries.append({"op": "version.archive", "object_id": v.id, "effect": "archive"})
+    if n_assigned:
+        plan.warnings.append(
+            f"version.archive {v.id}: 该版本仍有 {n_assigned} 个节点归属（保留呈现，只是不再参与新分配）")
+
+
 _APPLIERS = {
     "project.update": op_project_update,
     "node.create": op_node_create,
@@ -645,6 +808,9 @@ _APPLIERS = {
     "relation.update": op_relation_update,
     "relation.archive": op_relation_archive,
     "relation.restore": op_relation_restore,
+    "version.create": op_version_create,
+    "version.update": op_version_update,
+    "version.archive": op_version_archive,
 }
 
 
@@ -670,6 +836,9 @@ def _build_response(commit_id: str, req: CommitRequest, base_rev: int, new_rev: 
         "updated_relation_ids": plan.updated_relation_ids if base else [],
         "archived_relation_ids": plan.archived_relation_ids if base else [],
         "restored_relation_ids": plan.restored_relation_ids if base else [],
+        "created_version_ids": plan.created_version_ids if base else [],
+        "updated_version_ids": plan.updated_version_ids if base else [],
+        "archived_version_ids": plan.archived_version_ids if base else [],
         "warnings": plan.warnings if base else [],
         "already_committed": already_committed,
     }
