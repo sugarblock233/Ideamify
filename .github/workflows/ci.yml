@@ -130,6 +130,7 @@ jobs:
       - name: Start container with a fresh named volume
         run: |
           docker run -d --name rm-ci-e2e \
+            -e RESEARCHMAP_AUTH_MODE=token \
             -e RESEARCHMAP_TOKENS='{"container":"ci-container-token-01"}' \
             -v rm-ci-data:/data \
             -p 127.0.0.1:18099:8000 \
@@ -227,7 +228,10 @@ jobs:
                   target = m.group(1).split("#", 1)[0].strip()
                   if not target:
                       continue
-                  if target.startswith(("http://", "https://", "mailto:", "#", "/")):
+                  # `attachment:` is the app's own URL scheme for managed
+                  # image links (always inside inline code in docs). It is a
+                  # database reference, not a filesystem path.
+                  if target.startswith(("http://", "https://", "mailto:", "attachment:", "#", "/")):
                       continue
                   checked += 1
                   if not (pathlib.Path(f).parent / target).resolve().exists():
