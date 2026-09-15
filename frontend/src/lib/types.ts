@@ -51,6 +51,17 @@ export interface Project {
   created_by: string;
 }
 
+/** 科研版本阶段标签（E 批 §7）：与保存 revision 完全无关，只呈现归属。 */
+export interface ResearchVersion {
+  id: string;
+  name: string;
+  order_index: number;
+  description: string;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Lightweight node row as returned by GET /projects/{p}/graph (no details_md). */
 export interface GraphNode {
   id: string;
@@ -64,6 +75,8 @@ export interface GraphNode {
   evidence_count: number;
   child_count: number;
   relation_count: number;
+  /** 科研版本归属（展示顺序）；E 批 §7 */
+  version_ids: string[];
   /** only ever true when the graph was fetched with include_archived (B04) */
   archived?: boolean;
   created_at: string;
@@ -74,6 +87,7 @@ export interface GraphNode {
 export interface GraphResponse {
   project_revision: number;
   project: Project;
+  versions: ResearchVersion[];
   nodes: GraphNode[];
 }
 
@@ -93,6 +107,8 @@ export interface NodeFull {
   details_md: string;
   tags: string[];
   evidence: EvidenceItem[];
+  /** 科研版本归属（展示顺序）；E 批 §7 */
+  version_ids: string[];
   archived: boolean;
   created_at: string;
   updated_at: string;
@@ -226,6 +242,9 @@ export interface CommitResponse {
   updated_relation_ids: string[];
   archived_relation_ids: string[];
   restored_relation_ids: string[];
+  created_version_ids: string[];
+  updated_version_ids: string[];
+  archived_version_ids: string[];
   warnings: string[];
   already_committed: boolean;
 }

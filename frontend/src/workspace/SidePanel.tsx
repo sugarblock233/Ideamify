@@ -13,6 +13,7 @@ import type {
   Project,
   RelationItem,
   RelationKind,
+  ResearchVersion,
 } from "../lib/types";
 import { NODE_KINDS, NODE_STATUSES, RELATION_KINDS } from "../lib/types";
 import { STATUS_COLOR, fmtTime, kindLabel, relationKindLabel, statusLabel } from "../lib/format";
@@ -38,6 +39,8 @@ export interface Draft {
   details_md: string;
   tags: string[];
   evidence: EvidenceItem[];
+  /** E 批 §7：科研版本归属（id 数组；显式数组 = 整组替换） */
+  version_ids: string[];
 }
 
 export function draftOf(n: NodeFull): Draft {
@@ -53,6 +56,7 @@ export function draftOf(n: NodeFull): Draft {
     details_md: n.details_md,
     tags: [...n.tags],
     evidence: JSON.parse(JSON.stringify(n.evidence)) as EvidenceItem[],
+    version_ids: [...n.version_ids],
   };
 }
 
@@ -65,13 +69,23 @@ export function draftFieldLabel(f: keyof Draft): string {
  *  the user can compare instead of being told "已保留你的值" after the fact. */
 export type DraftConflict = FieldConflict<Draft>;
 
-/** Human-readable rendering of any draft field for the comparison table. */
-export function formatDraftValue(field: keyof Draft, v: Draft[keyof Draft]): string {
+/** Human-readable rendering of any draft field for the comparison table.
+ *  `versionNameOf` maps科研版本 id → name, so conflicts read as names, not UUIDs. */
+export function formatDraftValue(
+  field: keyof Draft,
+  v: Draft[keyof Draft],
+  versionNameOf?: (id: string) => string | null,
+): string {
   if (field === "kind") return kindLabel(v as NodeKind);
   if (field === "status") return statusLabel(v as NodeStatus);
   if (field === "tags") {
     const tags = v as string[];
     return tags.length ? tags.join(t("common.list.sep")) : t("common.empty.paren");
+  }
+  if (field === "version_ids") {
+    const ids = v as string[];
+    if (!ids.length) return t("ver.unassigned");
+    return ids.map((id) => versionNameOf?.(id) ?? id).join(t("common.list.sep"));
   }
   if (field === "evidence") {
     const e = v as EvidenceItem[];
@@ -80,6 +94,13 @@ export function formatDraftValue(field: keyof Draft, v: Draft[keyof Draft]): str
   }
   const s = String(v ?? "");
   return s.trim() ? s : t("common.empty.paren");
+}
+
+/** maps科研版本 id → name, so conflicts read as names, not UUIDs */
+export function versionNameOf(
+  versions: ResearchVersion[],
+): (id: string) => string | null {
+  return (id) => versions.find((v) => v.id === id)?.name ?? null;
 }
 
 export function diffDraft(base: Draft, cur: Draft): Partial<Draft> {
@@ -98,6 +119,8 @@ export interface SidePanelProps {
   loading: boolean;
   tab: "detail" | "relations" | "history";
   setTab: (t: "detail" | "relations" | "history") => void;
+  /** E 批 §7：科研版本（展示顺序），创建/编辑表单的版本 chip 数据源 */
+  versions: ResearchVersion[];
 
   draft: Draft | null;
   setDraft: (d: Draft | null) => void;
@@ -202,7 +225,9 @@ export default function SidePanel(p: SidePanelProps) {
           )}
         </div>
       </div>
-      {p.createDraft && <CreateDraftTab draft={p.createDraft} pid={p.project?.id ?? null} />}
+      {p.createDraft && (
+        <CreateDraftTab draft={p.createDraft} pid={p.project?.id ?? null} versions={p.versions} />
+      )}
       {/* C2: the wrapped detail stays mounted (hidden) so an in-progress edit
           survives the draft session; e2e targets the draft pathline by testid
           to dodge the hidden duplicate. */}
@@ -316,7 +341,11 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
         </div>
       )}
       {p.conflicts.length > 0 && (
-        <ConflictResolver conflicts={p.conflicts} onResolve={p.onResolveConflictField} />
+        <ConflictResolver
+          conflicts={p.conflicts}
+          onResolve={p.onResolveConflictField}
+          versionNameOf={versionNameOf(p.versions)}
+        />
       )}
       {p.draftErr && <div className="hint err">{p.draftErr}</div>}
 
@@ -327,7 +356,7 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
       )}
 
       {editing ? (
-        <NodeFieldsForm d={d} set={set} pid={p.project?.id ?? null} />
+        <NodeFieldsForm d={d} set={set} pid={p.project?.id ?? null} versions={p.versions} />
       ) : (
         <ReadView n={n} />
       )}
@@ -383,7 +412,18 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
  *  (editing an existing node) and the canvas draft session (C2: creating a
  *  node). Purely presentational — validation, gating and save live with the
  *  caller. */
-export function NodeFieldsForm({ d, set, pid }: { d: Draft; set: (patch: Partial<Draft>) => void; pid: string | null }) {
+export function NodeFieldsForm({
+  d,
+  set,
+  pid,
+  versions,
+}: {
+  d: Draft;
+  set: (patch: Partial<Draft>) => void;
+  pid: string | null;
+  /** E 批 §7：可选（旧调用点可不传）；传入后显示科研版本 chip 多选 */
+  versions?: ResearchVersion[];
+}) {
   const t = useT();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewMd, setPreviewMd] = useState(false);
@@ -467,6 +507,38 @@ export function NodeFieldsForm({ d, set, pid }: { d: Draft; set: (patch: Partial
         }
         style={{ width: "100%" }}
       />
+
+      <label className="field">{t("ver.label")}</label>
+      {(!versions || versions.length === 0) ? (
+        <div className="muted" data-testid="ver-none">{t("ver.none.yet")}</div>
+      ) : (
+        <div className="ver-chips">
+          {versions.map((v) => {
+            const on = d.version_ids.includes(v.id);
+            // 已归档版本不再可选，但既有归属仍显示（保留 on 态），避免分配悄无声息消失
+            return (
+              <button
+                key={v.id}
+                type="button"
+                className={`chip ver-chip${on ? " on" : ""}`}
+                data-testid={`ver-chip-${v.id.slice(0, 8)}`}
+                aria-pressed={on}
+                disabled={v.archived}
+                title={v.description || v.name}
+                onClick={() =>
+                  set({
+                    version_ids: on
+                      ? d.version_ids.filter((x) => x !== v.id)
+                      : [...d.version_ids, v.id],
+                  })
+                }
+              >
+                {v.archived ? `${v.name}·${t("ver.archived")}` : v.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <label className="field detail-label">
         {t("edit.field.details")}
@@ -648,9 +720,11 @@ export function NodeFieldsForm({ d, set, pid }: { d: Draft; set: (patch: Partial
 function CreateDraftTab({
   draft,
   pid,
+  versions,
 }: {
   draft: NonNullable<SidePanelProps["createDraft"]>;
   pid: string | null;
+  versions: ResearchVersion[];
 }) {
   const t = useT();
   const d = draft.fields;
@@ -688,7 +762,7 @@ function CreateDraftTab({
           {t("detail.gate.hint", { status: statusLabel(d.status), items: missing.join(t("common.list.sep")) })}
         </div>
       )}
-      <NodeFieldsForm d={d} set={set} pid={pid} />
+      <NodeFieldsForm d={d} set={set} pid={pid} versions={versions} />
       <div className="savebar">
         <button className="primary" onClick={draft.onSave} disabled={blocked} data-testid="draft-save">
           {draft.busy ? t("modal.creating") : t("modal.create")}
@@ -710,9 +784,11 @@ function CreateDraftTab({
 function ConflictResolver({
   conflicts,
   onResolve,
+  versionNameOf,
 }: {
   conflicts: DraftConflict[];
   onResolve: (field: keyof Draft, choice: "local" | "server" | "manual") => void;
+  versionNameOf?: (id: string) => string | null;
 }) {
   const t = useT();
   return (
@@ -725,15 +801,15 @@ function ConflictResolver({
           <div className="conflict-name">{c.label}</div>
           <div className="conflict-col">
             <span className="conflict-tag">{t("conflict.tag.base")}</span>
-            <pre>{formatDraftValue(c.field, c.base)}</pre>
+            <pre>{formatDraftValue(c.field, c.base, versionNameOf)}</pre>
           </div>
           <div className="conflict-col">
             <span className="conflict-tag">{t("conflict.tag.local")}</span>
-            <pre>{formatDraftValue(c.field, c.local)}</pre>
+            <pre>{formatDraftValue(c.field, c.local, versionNameOf)}</pre>
           </div>
           <div className="conflict-col">
             <span className="conflict-tag">{t("conflict.tag.server")}</span>
-            <pre>{formatDraftValue(c.field, c.server)}</pre>
+            <pre>{formatDraftValue(c.field, c.server, versionNameOf)}</pre>
           </div>
           <div className="conflict-actions">
             <button onClick={() => onResolve(c.field, "local")}>{t("conflict.keep.mine")}</button>

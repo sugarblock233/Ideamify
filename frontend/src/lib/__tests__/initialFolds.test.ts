@@ -23,6 +23,7 @@ function g(id: string, parent_id: string | null, child_count = 0): GraphNode {
     evidence_count: 0,
     child_count,
     relation_count: 0,
+    version_ids: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     created_by: "t",

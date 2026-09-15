@@ -464,6 +464,13 @@ label.field { display: block; margin: 8px 0 2px; font-size: 12px; color: var(--i
   background: var(--warn-bg); border: 1px solid var(--warn-edge);
   border-radius: 10px; padding: 1px 8px; white-space: nowrap;
 }
+/* E 批 §7：科研版本多选 chip（toggle 命中态用 --sel 与卡片选中一致） */
+.ver-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+button.chip.ver-chip { cursor: pointer; color: var(--ink-dim); background: transparent; }
+button.chip.ver-chip:disabled { cursor: default; opacity: .6; }
+button.chip.ver-chip.on {
+  color: #fff; background: var(--sel); border-color: var(--sel);
+}
 
 /* B01: read-first detail view */
 .readview { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }

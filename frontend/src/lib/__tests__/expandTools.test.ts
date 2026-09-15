@@ -25,6 +25,7 @@ function node(parent_id: string | null, childCount = 0): GraphNode {
     evidence_count: 0,
     child_count: childCount,
     relation_count: 0,
+    version_ids: [],
     created_at: "",
     updated_at: "",
     created_by: "",

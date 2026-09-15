@@ -19,6 +19,7 @@ import {
   type Project,
   type RelationItem,
   type RelationKind,
+  type ResearchVersion,
   type SearchItem,
 } from "../lib/types";
 import { useT } from "../lib/i18n";
@@ -80,6 +81,7 @@ const draftEmpty: Draft = {
   details_md: "",
   tags: [],
   evidence: [],
+  version_ids: [],
 };
 
 /** C2: has the user typed anything into the create draft? Only then is
@@ -112,6 +114,8 @@ export default function Workspace({
   const t = useT();
   const [project, setProject] = useState<Project | null>(null);
   const [graph, setGraph] = useState<GraphNode[]>([]);
+  /** E 批 §7：科研版本阶段标签（展示顺序）；每次刷新 graph 时随之更新 */
+  const [versions, setVersions] = useState<ResearchVersion[]>([]);
   // Reading a node can advance the known project revision without updating
   // the canvas. Poll and refresh against the graph we actually rendered.
   const graphRevisionRef = useRef(0);
@@ -369,6 +373,7 @@ export default function Workspace({
   const syncAll = useCallback(async () => {
     const g = await fetchGraph();
     setGraph(g.nodes);
+    setVersions(g.versions ?? []);
     graphRevisionRef.current = g.project_revision;
     setGraphLoaded(true);
     setProject((p) => (p ? { ...p, revision: g.project_revision } : p));
@@ -587,6 +592,7 @@ export default function Workspace({
         setAppVersion(sess.app_version);
         setProject({ ...proj, objective: proj.objective ?? "" } as Project);
         setGraph(g.nodes);
+        setVersions(g.versions ?? []);
         graphRevisionRef.current = g.project_revision;
         setGraphLoaded(true);
         // A03: first open (no saved view at all) → show only the virtual root
@@ -656,6 +662,7 @@ export default function Workspace({
         const g = await fetchGraph();
         if (alive) {
           setGraph(g.nodes);
+          setVersions(g.versions ?? []);
           graphRevisionRef.current = g.project_revision;
         }
       } catch (e) {
@@ -723,6 +730,7 @@ export default function Workspace({
       }
       setMarks({ newIds, changedIds, badges });
       setGraph(g.nodes);
+      setVersions(g.versions ?? []);
       graphRevisionRef.current = g.project_revision;
       setProject((p) => (p ? { ...p, revision: g.project_revision } : p));
       setPendingRev(null);
@@ -921,6 +929,8 @@ async function rebaseDraft() {
     if (f.details_md.trim()) op.details_md = f.details_md;
     const evs = f.evidence.filter((e) => e.label.trim() || e.value.trim());
     if (evs.length > 0) op.evidence = evs.map((e) => ({ ...e }));
+    // E 批 §7：科研版本归属仅在用户勾选时随创建提交（省略 = 未分配）
+    if (f.version_ids.length > 0) op.version_ids = [...f.version_ids];
     setNodeDraft({ ...s, busy: true, err: null });
     try {
       const res = await api.commit(pid, {
@@ -1290,6 +1300,7 @@ async function rebaseDraft() {
           loading={nodeLoading}
           tab={tab}
           setTab={setTab}
+          versions={versions}
           draft={draft}
           setDraft={setDraft}
           dirty={dirty}
