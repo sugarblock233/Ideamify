@@ -273,6 +273,8 @@ export const en: Record<keyof typeof zh, string> = {
   "ver.none.yet": "No research versions yet",
   "ver.unassigned": "Unassigned",
   "ver.archived": "archived",
+  "detail.outside.hint": "This node is outside the current version filter",
+  "detail.outside.clear": "Clear filter and show",
   "att.external": "External image (not loaded): ",
   "edit.evidence.label": "Evidence ({n}/20) — pointers only; the system never fetches, executes or proxies reads",
   "edit.ev.inline": "Inline note",
@@ -436,4 +438,7 @@ export const en: Record<keyof typeof zh, string> = {
   "layout.v": "Vertical tree",
   "layout.outline": "Outline",
   "vt.layout.title": "Switch canvas layout (folds/branch/viewport are remembered per layout)",
+  "vt.version.title": "Filter by research version (switching layouts keeps the filter)",
+  "vt.version.all": "All versions",
+  "vt.version.unassigned": "Unassigned",
 };

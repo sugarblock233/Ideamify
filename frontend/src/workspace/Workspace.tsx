@@ -8,6 +8,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api, { uuidv4 } from "../lib/api";
 import { initialFolds } from "../lib/layout";
+import { filterNodesByVersion, VERSION_FILTER_UNASSIGNED } from "../lib/versionFilter";
 import { preserveUndecided, threeWayMerge } from "../lib/merge";
 import {
   ApiError,
@@ -212,6 +213,23 @@ export default function Workspace({
   const toggleLowInterference = useCallback(
     () => setLowInterference(saveProjectViewPrefs(pid, { lowInterference: !lowInterference }).lowInterference),
     [pid, lowInterference],
+  );
+  // E 批 §7：版本筛选与 layout/density 同层（跨布局的视图状态，不进 LayoutView）
+  const [versionId, setVersionIdRaw] = useState<string | null>(
+    () => loadProjectViewPrefs(pid).versionId,
+  );
+  useEffect(() => {
+    setVersionIdRaw(loadProjectViewPrefs(pid).versionId);
+  }, [pid]);
+  const setVersionId = useCallback(
+    (v: string | null) => setVersionIdRaw(saveProjectViewPrefs(pid, { versionId: v }).versionId),
+    [pid],
+  );
+  /** E 批 §7：版本筛选在 buildTreeData 之前（方案 §257 展示流程）。节点数组
+   *  过滤 + 祖先上下文链（lib/versionFilter）；所有视图与展开工具都吃这份。 */
+  const filteredGraph = useMemo(
+    () => filterNodesByVersion(graph, versionId),
+    [graph, versionId],
   );
 
   const [pendingLocate, setPendingLocate] = useState<{ nodeId: string } | null>(null);
@@ -877,17 +895,28 @@ async function rebaseDraft() {
   /* --------------------------- node-create draft (C2) ---------------------- */
 
   /** C2 entry point: + 一级路线 (null) or + 子节点 (parentId). The ids are
-   *  pinned here so every later save/retry of this draft reuses them. */
-  const startNodeDraft = useCallback((parentId: string | null) => {
-    setNodeDraft({
-      id: uuidv4(),
-      requestId: uuidv4(),
-      parentId,
-      fields: { ...draftEmpty, tags: [], evidence: [] },
-      err: null,
-      busy: false,
-    });
-  }, []);
+   *  pinned here so every later save/retry of this draft reuses them.
+   *  E 批 §7.2: 新建节点默认带入当前筛选选中的科研版本（未分配视图/全部
+   *  视图不预填——预填了会立刻把自己筛掉）。 */
+  const startNodeDraft = useCallback(
+    (parentId: string | null) => {
+      setNodeDraft({
+        id: uuidv4(),
+        requestId: uuidv4(),
+        parentId,
+        fields: {
+          ...draftEmpty,
+          tags: [],
+          evidence: [],
+          version_ids:
+            versionId && versionId !== VERSION_FILTER_UNASSIGNED ? [versionId] : [],
+        },
+        err: null,
+        busy: false,
+      });
+    },
+    [versionId],
+  );
 
   const cancelNodeDraft = useCallback(() => setNodeDraft(null), []);
 
@@ -1210,7 +1239,7 @@ async function rebaseDraft() {
                the two presentations always agree; switching back remounts the
                canvas, which re-applies its own layout slot's saved viewport). */
             <OutlineView
-              nodes={graph}
+              nodes={filteredGraph}
               folds={folds}
               branchRoot={branchRoot}
               selectedId={selectedId}
@@ -1232,7 +1261,7 @@ async function rebaseDraft() {
             <Canvas
             projectId={pid}
             project={project}
-            graph={graph}
+            graph={filteredGraph}
             graphLoaded={graphLoaded}
             selectedId={selectedId}
             selectedRelationId={selectedRelationId}
@@ -1272,7 +1301,7 @@ async function rebaseDraft() {
           )}
           {toast && <div className={`toast ${toast.kind === "err" ? "err" : "ok"}`}>{toast.msg}</div>}
           <ViewToolbar
-            nodes={graph}
+            nodes={filteredGraph}
             folds={folds}
             branchRoot={branchRoot}
             selectedId={selectedId}
@@ -1285,6 +1314,9 @@ async function rebaseDraft() {
             onSetDensity={setDensity}
             layout={layout}
             onSetLayout={switchLayout}
+            versions={versions}
+            versionId={versionId}
+            onSetVersionId={setVersionId}
           />
         </div>
 
@@ -1301,6 +1333,8 @@ async function rebaseDraft() {
           tab={tab}
           setTab={setTab}
           versions={versions}
+          nodeOutsideView={node != null && !filteredGraph.some((n) => n.id === node.id)}
+          onClearVersionFilter={() => setVersionId(null)}
           draft={draft}
           setDraft={setDraft}
           dirty={dirty}

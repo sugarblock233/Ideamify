@@ -177,13 +177,16 @@ export interface ProjectViewPrefs {
   layout: LayoutMode;
   density: DensityMode;
   lowInterference: boolean;
+  /** E 批 §7：科研版本筛选（跨布局共享，不进 LayoutView）。
+   *  null = 全部；VERSION_FILTER_UNASSIGNED = 未分配；否则为版本 id。 */
+  versionId: string | null;
 }
 
 const LAYOUTS: readonly LayoutMode[] = ["h", "v", "outline"];
 const DENSITIES: readonly DensityMode[] = ["auto", "reading", "compact", "overview"];
 
 export function projectViewPrefsDefaults(): ProjectViewPrefs {
-  return { version: 1, layout: "h", density: "auto", lowInterference: false };
+  return { version: 1, layout: "h", density: "auto", lowInterference: false, versionId: null };
 }
 
 export function loadProjectViewPrefs(pid: string): ProjectViewPrefs {
@@ -195,6 +198,7 @@ export function loadProjectViewPrefs(pid: string): ProjectViewPrefs {
     layout: LAYOUTS.includes(o.layout as LayoutMode) ? (o.layout as LayoutMode) : "h",
     density: DENSITIES.includes(o.density as DensityMode) ? (o.density as DensityMode) : "auto",
     lowInterference: o.lowInterference === true,
+    versionId: typeof o.versionId === "string" ? o.versionId : null,
   };
 }
 

@@ -121,6 +121,10 @@ export interface SidePanelProps {
   setTab: (t: "detail" | "relations" | "history") => void;
   /** E 批 §7：科研版本（展示顺序），创建/编辑表单的版本 chip 数据源 */
   versions: ResearchVersion[];
+  /** E 批 §7：当前 node 不在版本筛选范围内（方案 §6 line 108：筛选排除的
+   *  选中节点保留于详情，标明「当前视图外」并提供显示入口） */
+  nodeOutsideView: boolean;
+  onClearVersionFilter: () => void;
 
   draft: Draft | null;
   setDraft: (d: Draft | null) => void;
@@ -313,6 +317,14 @@ function DetailTab({ p, n }: { p: SidePanelProps; n: NodeFull }) {
           {t("detail.camefrom")}
           <button style={{ marginLeft: 8 }} onClick={p.onBackToFrom}>
             {t("detail.back.to.from")}
+          </button>
+        </div>
+      )}
+      {p.nodeOutsideView && (
+        <div className="hint" data-testid="outside-view-hint">
+          {t("detail.outside.hint")}{" "}
+          <button style={{ marginLeft: 6 }} onClick={p.onClearVersionFilter}>
+            {t("detail.outside.clear")}
           </button>
         </div>
       )}

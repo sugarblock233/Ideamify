@@ -119,12 +119,13 @@ describe("app prefs (side panel)", () => {
 });
 
 describe("project view prefs", () => {
-  it("defaults to horizontal tree, auto density, no low-interference", () => {
+  it("defaults to horizontal tree, auto density, no low-interference, no version filter", () => {
     expect(loadProjectViewPrefs(PID)).toEqual({
       version: 1,
       layout: "h",
       density: "auto",
       lowInterference: false,
+      versionId: null,
     });
   });
 
@@ -139,5 +140,13 @@ describe("project view prefs", () => {
     const p = loadProjectViewPrefs(PID);
     expect(p.layout).toBe("h");
     expect(p.density).toBe("auto");
+  });
+
+  it("persists the version filter across sessions (E 批 §7)", () => {
+    saveProjectViewPrefs(PID, { versionId: "ver-uuid-1" });
+    expect(loadProjectViewPrefs(PID).versionId).toBe("ver-uuid-1");
+    // junk / absent → null, never a truthy non-string
+    saveProjectViewPrefs(PID, { versionId: 3 as unknown as string });
+    expect(loadProjectViewPrefs(PID).versionId).toBe(null);
   });
 });

@@ -271,6 +271,8 @@ export const zh = {
   "ver.none.yet": "尚无科研版本",
   "ver.unassigned": "未分配",
   "ver.archived": "已归档",
+  "detail.outside.hint": "该节点不在当前版本筛选范围内",
+  "detail.outside.clear": "清除筛选并显示",
   "att.external": "外部图片（不加载）：",
   "edit.evidence.label": "证据引用（{n}/20）——只登记定位，系统不抓取、不执行、不代理读取",
   "edit.ev.inline": "inline 说明",
@@ -439,6 +441,9 @@ export const zh = {
   "layout.v": "纵向树",
   "layout.outline": "大纲",
   "vt.layout.title": "切换画布布局（每个布局分别记住折叠/分支/视口）",
+  "vt.version.title": "按科研版本筛选（切换布局不清除筛选）",
+  "vt.version.all": "全部版本",
+  "vt.version.unassigned": "未分配",
 } as const;
 
 export type DictKey = keyof typeof zh;

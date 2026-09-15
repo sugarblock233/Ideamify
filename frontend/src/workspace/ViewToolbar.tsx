@@ -19,8 +19,9 @@ import {
   expandToLevelFolds,
 } from "../lib/expandTools";
 import type { DensityMode, LayoutMode } from "../lib/viewPrefs";
+import { VERSION_FILTER_UNASSIGNED } from "../lib/versionFilter";
 import { useT } from "../lib/i18n";
-import type { GraphNode } from "../lib/types";
+import type { GraphNode, ResearchVersion } from "../lib/types";
 
 export interface ViewToolbarProps {
   nodes: GraphNode[];
@@ -39,6 +40,11 @@ export interface ViewToolbarProps {
   onSetDensity: (mode: DensityMode) => void;
   lowInterference: boolean;
   onToggleLowInterference: () => void;
+  /** E 批 §7：版本筛选（跨布局共享，null=全部）。
+   *  展开工具只吃过滤后的数组，绝不写这个值（同 branchRoot 的「不清过滤」）。 */
+  versions: ResearchVersion[];
+  versionId: string | null;
+  onSetVersionId: (id: string | null) => void;
 }
 
 const DENSITY_ORDER: DensityMode[] = ["reading", "compact", "overview", "auto"];
@@ -179,6 +185,36 @@ export default function ViewToolbar(p: ViewToolbarProps) {
             >
               {p.lowInterference ? t("b1.low.off") : t("b1.low.on")}
             </div>
+            {/* E 批 §7：版本筛选 — 全部/未分配/各版本。已归档版本仍可选带标记
+                （其归属节点要能浏览）；筛选与折叠/分支互不覆写。 */}
+            {p.versions.length > 0 && (
+              <div className="pop-item dotmenu-line" data-testid="vt-version" role="radiogroup" title={t("vt.version.title")}>
+                <button
+                  className={p.versionId === null ? "seg on" : "seg"}
+                  data-testid="vt-version-all"
+                  onClick={() => { p.onSetVersionId(null); }}
+                >
+                  {t("vt.version.all")}
+                </button>
+                <button
+                  className={p.versionId === VERSION_FILTER_UNASSIGNED ? "seg on" : "seg"}
+                  data-testid="vt-version-unassigned"
+                  onClick={() => { p.onSetVersionId(VERSION_FILTER_UNASSIGNED); }}
+                >
+                  {t("vt.version.unassigned")}
+                </button>
+                {p.versions.map((v) => (
+                  <button
+                    key={v.id}
+                    className={p.versionId === v.id ? "seg on" : "seg"}
+                    data-testid={`vt-version-${v.id.slice(0, 8)}`}
+                    onClick={() => { p.onSetVersionId(v.id); }}
+                  >
+                    {v.archived ? `${v.name}·${t("ver.archived")}` : v.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
