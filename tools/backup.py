@@ -7,11 +7,21 @@ Backup API）；**恢复需要**服务器停止写入（v0.1 不做在线热替�
 子命令：
   backup   完整在线备份：<out>/<ts>.db + <ts>.sql（iterdump），可选
            <ts>.json（向运行中的服务器要 /export 的 JSON 快照）
-           并对副本做 PRAGMA integrity_check + 计数摘要
+           并对副本做 PRAGMA integrity_check + 计数摘要；
+           附件字节随包拷到 <out>/attachments/，逐文件按 sha256 核对
   verify   对一个 .db 副本做完整性检查与计数，不改动文件
-  restore  服务器停止后：校验源副本 → 原子替换目标 data.db，旧库留档为
-           .pre-restore-<ts>；清理残留 -wal/-shm；给出重启提示
+  restore  服务器停止后：先核对源副本的**全部**附件（备份包 attachments/
+           或现有字节目录），全部通过才替换目标 data.db（旧库留档为
+           .pre-restore-<ts>、清理残留 -wal/-shm），再从备份包补齐附件；
+           给出重启提示
   show     打印某 db 的 project 清单与计数（用于恢复前人工核对）
+
+退出码（F02 合同：SQLite integrity 不证明附件完整）：
+  0  完整成功——库、所有附件字节、清单全部核对通过
+  3  部分——仅在调用方显式传 --allow-partial 时出现：缺失/损坏只记账不中断，
+     输出明确标注「部分」
+  非 0（含 2） 校验失败——备份侧：不打印「备份完成」；恢复侧：**替换目标库
+     之前**就中止，旧库原位不动
 
 环境变量：
   RESEARCHMAP_BASE_URL / RESEARCHMAP_TOKEN   仅 backup --json 需要
@@ -32,6 +42,8 @@ SCHEMA_TABLES = ("projects", "nodes", "relations", "commits")
 # D4: attachments 表在迁移 0002 之后才存在——旧库副本 verify 不因缺它失败，
 # 只在新库上计入。
 OPTIONAL_TABLES = ("attachments",)
+# F02：可区分的退出码——0 完整 / 3 部分（仅 --allow-partial）/ 其余失败。
+EXIT_PARTIAL = 3
 
 
 def ts() -> str:
@@ -122,22 +134,22 @@ def attachment_rows(db_path: str) -> list[dict]:
             if not cols:
                 return []
             rows = con.execute(
-                "SELECT id, project_id, mime, bytes, sha256, state, created_at "
+                "SELECT id, project_id, mime, bytes, sha256, state, created_at, original_name "
                 "FROM attachments ORDER BY created_at, id").fetchall()
         except sqlite3.OperationalError:
             return []
     finally:
         con.close()
-    keys = ("id", "project_id", "mime", "bytes", "sha256", "state", "created_at")
+    keys = ("id", "project_id", "mime", "bytes", "sha256", "state", "created_at", "original_name")
     return [dict(zip(keys, r)) for r in rows]
 
 
 def copy_attachments(db_path: str, storage_dir: str | None, out_dir: str, stamp: str) -> dict | None:
-    """D4: 附件字节随备份包拷到 <out>/attachments/，manifest 落 JSON。
+    """附件字节随备份包拷到 <out>/attachments/，manifest 落 JSON。
 
-    完整性按行内 sha256 核对副本字节；缺失/损坏**只记录不中断**（备份尽量
-    带走能带走的），manifest 里逐文件记录 ok/missing/mismatch。旧库或未配置
-    storage 时返回 None（不产出附件目录）。
+    完整性按行内 sha256 **逐字节核对**副本；每个文件记 ok/missing/mismatch。
+    旧库或无附件行时返回 None（不产出附件目录）。返回值由调用方决定
+    严格失败 / 允许部分（F02：备份不能把缺件报成成功）。
     """
     rows = attachment_rows(db_path)
     if not rows:
@@ -146,20 +158,21 @@ def copy_attachments(db_path: str, storage_dir: str | None, out_dir: str, stamp:
         print(f"警告：库内有 {len(rows)} 条附件元数据，但附件目录不可用"
               f"（{storage_dir or '未配置 --storage'}），字节未入备份包。",
               file=sys.stderr)
-        return None
     att_dir = os.path.join(out_dir, "attachments")
     os.makedirs(att_dir, exist_ok=True)
     import hashlib
     manifest = {"stamp": stamp, "source_storage": storage_dir, "files": []}
     for r in rows:
-        src = os.path.join(storage_dir, r["id"])
+        src = os.path.join(storage_dir, r["id"]) if (storage_dir and os.path.isdir(storage_dir)) else None
         entry = {**r, "ok": False}
-        if not os.path.isfile(src):
+        if src is None:
+            entry["status"] = "missing"
+        elif not os.path.isfile(src):
             entry["status"] = "missing"
         else:
             data = open(src, "rb").read()
             digest = hashlib.sha256(data).hexdigest()
-            if digest != r["sha256"]:
+            if (r["bytes"] is not None and len(data) != r["bytes"]) or digest != r["sha256"]:
                 entry["status"] = "mismatch"
             else:
                 with open(os.path.join(att_dir, r["id"]), "wb") as f:
@@ -173,6 +186,19 @@ def copy_attachments(db_path: str, storage_dir: str | None, out_dir: str, stamp:
     n_ok = sum(1 for x in manifest["files"] if x["ok"])
     print(f"附件：{n_ok}/{len(rows)} 个文件入包（manifest：{mpath}）")
     return manifest
+
+
+def manifest_problems(manifest: dict | None) -> list[str]:
+    """归纳 manifest 里不可忽略的问题行（供备份/恢复统一判定）。"""
+    if not manifest:
+        return []
+    out = []
+    for f in manifest["files"]:
+        if f["status"] == "missing":
+            out.append(f"附件 {f['id']}（{f.get('original_name') or ''}）缺失")
+        elif f["status"] == "mismatch":
+            out.append(f"附件 {f['id']}（{f.get('original_name') or ''}）字节与 sha256/大小不符")
+    return out
 
 
 def cmd_backup(args) -> None:
@@ -232,16 +258,98 @@ def cmd_backup(args) -> None:
 
     storage = args.storage or os.path.join(os.path.dirname(os.path.abspath(args.db)), "attachments")
     att_manifest = copy_attachments(dst, storage, out_dir, stamp)
+    problems = manifest_problems(att_manifest)
 
     check = check_db(dst)
     for suffix in ("-wal", "-shm"):
         extra = dst + suffix
         if os.path.exists(extra):
             os.remove(extra)
-    print(f"备份完成：\n  db     {dst}\n  sql    {sql_path}"
-          + (f"\n  json   {json_path}" if json_path else "")
-          + (f"\n  att    {os.path.join(out_dir, 'attachments')}" if att_manifest else ""))
+    head = f"备份：\n  db     {dst}\n  sql    {sql_path}" \
+        + (f"\n  json   {json_path}" if json_path else "") \
+        + (f"\n  att    {os.path.join(out_dir, 'attachments')}" if att_manifest else "")
+    print(head)
     print("副本校验：integrity ok，counts =", json.dumps(check["counts"], ensure_ascii=False))
+
+    # F02：SQLite integrity 不证明附件完整。缺件/坏件让备份的"成功"失去意义，
+    # 必须显式失败（退出码 2）或经 --allow-partial 明确降级为部分备份
+    # （退出码 3），不许无差别地打印「备份完成 / integrity ok」。
+    if problems:
+        for p in problems:
+            print("附件问题：" + p, file=sys.stderr)
+        if not args.allow_partial:
+            raise SystemExit(
+                "备份不完整：附件字节缺失或校验不符（见上）。以上产物**不是一份完整备份**。\n"
+                "修复字节目录后重跑，或显式接受不完整结果：--allow-partial（退出码 3）。",
+            )
+        print("部分备份完成（缺件见上；退出码 3——不能当作完整副本使用/轮换）。")
+        sys.exit(EXIT_PARTIAL)
+
+
+def resolve_attachment_sources(src_db: str, package_dir: str | None,
+                               storage_dir: str | None) -> dict | None:
+    """恢复前的附件核对：对库内每条元数据，从备份包（优先）或现有字节目录
+    找文件并逐字节核对 sha256/大小。
+
+    返回 manifest 形状（files[].status: ok-package / ok-storage /
+    missing / mismatch，及 files[].from 其中一个来源），供：
+      1) 校验判定（问题行 → 严格失败或 --allow-partial）；
+      2) 换库后从备份包补齐字节（from == 'package' 的行复制进字节目录）。
+    """
+    import hashlib
+    rows = attachment_rows(src_db)
+    if not rows:
+        return None
+    pkg_ok = bool(package_dir and os.path.isdir(package_dir))
+    sto_ok = bool(storage_dir and os.path.isdir(storage_dir))
+    manifest = {"source_package": package_dir, "source_storage": storage_dir, "files": []}
+    for r in rows:
+        entry = {**r, "ok": False, "from": None}
+        candidates = []
+        if pkg_ok:
+            candidates.append(("package", os.path.join(package_dir, r["id"])))
+        if sto_ok:
+            candidates.append(("storage", os.path.join(storage_dir, r["id"])))
+        for source, path in candidates:
+            if not os.path.isfile(path):
+                entry["status"] = "missing"
+                continue
+            data = open(path, "rb").read()
+            digest = hashlib.sha256(data).hexdigest()
+            if (r["bytes"] is not None and len(data) != r["bytes"]) or digest != r["sha256"]:
+                entry["status"] = "mismatch"
+                continue
+            entry["status"] = f"ok-{source}"
+            entry["from"] = source
+            entry["ok"] = True
+            break
+        manifest["files"].append(entry)
+    n_ok = sum(1 for f in manifest["files"] if f["ok"])
+    print(f"附件核对：库内 {len(rows)} 条元数据，{n_ok} 个文件逐字节核对通过。")
+    return manifest
+
+
+def restore_attachment_bytes(manifest: dict, storage_dir: str | None) -> int:
+    """把来自备份包且核验通过的附件字节补进目标字节目录（已存在且一致的跳过）。
+
+    在**目标库已替换之后**调用（核对本身在替换前完成）。返回补齐的文件数。
+    """
+    if not storage_dir:
+        return 0
+    n = 0
+    for f in manifest["files"]:
+        if not f["ok"] or f["from"] != "package":
+            continue
+        dst_path = os.path.join(storage_dir, f["id"])
+        if os.path.isfile(dst_path):
+            import hashlib
+            data = open(dst_path, "rb").read()
+            if hashlib.sha256(data).hexdigest() == f["sha256"]:
+                continue  # 目标已有同内容文件
+        os.makedirs(storage_dir, exist_ok=True)
+        shutil.copy2(f["source_path"], dst_path)
+        n += 1
+    return n
 
 
 def cmd_restore(args) -> None:
@@ -251,6 +359,32 @@ def cmd_restore(args) -> None:
         raise SystemExit("拒绝：恢复前必须确认服务器已停止写入（--server-stopped）。")
     info = check_db(src)
     print("源副本校验：", json.dumps(info["counts"], ensure_ascii=False))
+
+    # F02：在动目标库**之前**核对附件——验证失败的恢复不许先覆盖再宣称成功。
+    storage = args.storage or os.path.join(os.path.dirname(dst), "attachments")
+    pkg_dir = args.attachments or (os.path.join(os.path.dirname(src), "attachments")
+                                   if os.path.isdir(os.path.join(os.path.dirname(src), "attachments")) else None)
+    att_manifest = resolve_attachment_sources(src, pkg_dir, storage)
+    att_problems = manifest_problems(att_manifest)
+    if att_manifest:
+        for f in att_manifest["files"]:
+            f["source_path"] = (os.path.join(pkg_dir, f["id"])
+                                if f["from"] == "package" else os.path.join(storage or "", f["id"]))
+        n_ok = sum(1 for f in att_manifest["files"] if f["ok"])
+        if att_problems:
+            for p in att_problems:
+                print("附件问题：" + p, file=sys.stderr)
+            if not args.allow_partial:
+                raise SystemExit(
+                    "恢复中止（目标库未被改动）：库内引用的附件无法全部核验通过。\n"
+                    f"  备份包附件目录：{pkg_dir or '（未找到）'}\n"
+                    f"  现有字节目录：{storage}\n"
+                    "先补齐备份包里的 attachments/（对照 manifest 逐文件 sha256），"
+                    "或显式接受缺件恢复：--allow-partial（退出码 3）。",
+                )
+        else:
+            print(f"附件来源：{'备份包' if pkg_dir else storage or '（无）'}，核验通过 {n_ok} 条。")
+
     print("恢复前目标内容：")
     try:
         con = open_ro(dst)
@@ -278,15 +412,17 @@ def cmd_restore(args) -> None:
             os.remove(extra)
             print(f"清理残留：{extra}")
     shutil.copy2(src, dst)
-    # D4: 附件目录核对（只提示，不自动搬移——恢复决策由运维做）
-    atts = attachment_rows(dst)
-    if atts:
-        storage = args.storage or os.path.join(os.path.dirname(dst), "attachments")
-        have = sum(1 for r in atts if os.path.isfile(os.path.join(storage, r["id"])))
-        print(f"附件核对：库内 {len(atts)} 条元数据，附件目录 {storage} 命中 {have} 个文件。"
-              + ("请随备份包一起恢复 attachments/（manifest 逐文件核对 sha256）。"
-                 if have < len(atts) else ""))
+    if att_manifest:
+        if pkg_dir and os.path.isdir(pkg_dir):
+            n = restore_attachment_bytes(att_manifest, storage)
+            if n:
+                print(f"附件字节：从备份包补入 {n} 个到 {storage}。")
+        elif not args.allow_partial:
+            print(f"提示：附件字节目录 {storage} 由运维核对（备份包未附带 attachments/）。")
     check = check_db(dst)
+    if att_problems:
+        print(f"部分恢复完成（缺件见上；退出码 3——附件不全，重启后引用会 404）。")
+        sys.exit(EXIT_PARTIAL)
     print(f"恢复完成（重启服务器后即可读）：integrity ok, counts = "
           f"{json.dumps(check['counts'], ensure_ascii=False)}\n"
           "提示：恢复后请重新加载 UI 校验版本号；不要往旧 .pre-restore 文件再写。")
@@ -304,6 +440,9 @@ def main() -> None:
                    help="同时向运行中的服务器取 /export JSON（需 RESEARCHMAP_* 环境变量）")
     s.add_argument("--storage", default=None,
                    help="附件字节目录（默认取 --db 同目录的 attachments/；D 批 §9.2）")
+    # F02：缺件/坏件默认硬失败；--allow-partial 显式接受缺件并以退出码 3 收场
+    s.add_argument("--allow-partial", action="store_true",
+                   help="附件缺失/校验不符时不失败，降级为「部分备份」（退出码 3）")
     s.add_argument("--base", default=None)
     s.set_defaults(fn=cmd_backup)
 
@@ -321,6 +460,10 @@ def main() -> None:
     s.add_argument("--server-stopped", action="store_true")
     s.add_argument("--storage", default=None,
                    help="附件字节目录（默认取 --dst 同目录的 attachments/）")
+    s.add_argument("--attachments", default=None,
+                   help="备份包的 attachments/ 目录（默认取 --src 同目录的 attachments/）")
+    s.add_argument("--allow-partial", action="store_true",
+                   help="附件缺失/校验不符时仍恢复库，但以退出码 3 标明不完整（默认中止且不动目标）")
     s.add_argument("--yes", action="store_true", help="跳过交互确认")
     s.set_defaults(fn=cmd_restore)
 

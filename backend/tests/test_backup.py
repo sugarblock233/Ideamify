@@ -150,40 +150,49 @@ ATT_PNG = base64.b64decode(
 )
 
 
-def _db_with_attachments(path: Path, storage: Path, rows=("a1", "a2")) -> Path:
-    """有 attachments 表的库 + 对应字节目录（a2 故意缺文件，验证 manifest 记账）。"""
-    con = sqlite3.connect(path)
-    _create_schema(con)
+def _create_attachments(con):
     con.execute("CREATE TABLE attachments (id TEXT PRIMARY KEY, project_id TEXT, "
                 "mime TEXT, bytes INTEGER, sha256 TEXT, width INTEGER, height INTEGER, "
                 "original_name TEXT, state TEXT, created_by TEXT, created_at TEXT)")
-    for rid in rows:
+
+
+def _db_with_attachments(path: Path, storage: Path, rows=("a1", "a2"),
+                         corrupt_last: bool = False) -> Path:
+    """有 attachments 表的库 + 对应字节目录（最后一行故意无文件/坏文件）。"""
+    con = sqlite3.connect(path)
+    _create_schema(con)
+    _create_attachments(con)
+    for i, rid in enumerate(rows):
+        body = ATT_PNG
+        if corrupt_last and i == len(rows) - 1:
+            body = b"x"  # 同名但字节损坏：元数据仍记原 PNG 的 sha/大小
         con.execute("INSERT INTO attachments VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (rid, "p1", "image/png", len(ATT_PNG),
-                     hashlib.sha256(b"x" if rid == "a2" else ATT_PNG).hexdigest(),
+                     hashlib.sha256(ATT_PNG).hexdigest(),
                      1, 1, "fig.png", "staged", "tester", "2026-09-15T00:00:00Z"))
+        (storage / rid).write_bytes(body)
     con.commit()
     con.close()
-    (storage / "a1").write_bytes(ATT_PNG)
     return path
 
 
 def test_backup_copies_attachment_bytes_with_manifest(tmp_path):
     storage = tmp_path / "storage"
     storage.mkdir()
-    src = _db_with_attachments(tmp_path / "live.db", storage)
+    src = _db_with_attachments(tmp_path / "live.db", storage, rows=("a1",))
     out = tmp_path / "out"
 
     r = _run("backup", "--db", str(src), "--out", str(out), "--storage", str(storage))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "1/2 个文件入包" in r.stdout
+    assert "1/1 个文件入包" in r.stdout
+    assert "备份" in r.stdout and "退出码 3" not in r.stdout
 
     copied = out / "attachments" / "a1"
     assert copied.read_bytes() == ATT_PNG
 
     mf = json.loads(next(out.glob("attachments-manifest-*.json")).read_text(encoding="utf-8"))
     statuses = {f["id"]: (f["status"], f["ok"]) for f in mf["files"]}
-    assert statuses == {"a1": ("ok", True), "a2": ("missing", False)}
+    assert statuses == {"a1": ("ok", True)}
     assert mf["files"][0]["sha256"] == hashlib.sha256(ATT_PNG).hexdigest()
 
 
@@ -195,29 +204,93 @@ def test_backup_without_attachment_table_skips_the_directory(tmp_path):
     assert not (out / "attachments").exists()
 
 
-def test_backup_warns_when_storage_dir_is_missing(tmp_path):
+def test_backup_with_missing_attachment_fails_strict(tmp_path):
+    """F02：库里有附件元数据、字节缺失 → 默认硬失败，不打印「备份完成」。"""
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "live.db", storage)  # a2 无文件
+    (storage / "a2").unlink()
+    out = tmp_path / "out"
+
+    r = _run("backup", "--db", str(src), "--out", str(out), "--storage", str(storage))
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "备份不完整" in r.stdout + r.stderr
+    assert "缺失" in r.stdout + r.stderr
+    assert "备份完成" not in r.stdout and "部分备份完成" not in r.stdout
+    # manifest 仍然产出，记账给运维
+    mf = json.loads(next(out.glob("attachments-manifest-*.json")).read_text(encoding="utf-8"))
+    assert {f["id"]: f["status"] for f in mf["files"]} == {"a1": "ok", "a2": "missing"}
+
+
+def test_backup_with_missing_attachment_allow_partial_exits_3(tmp_path):
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "live.db", storage)
+    (storage / "a2").unlink()
+    out = tmp_path / "out"
+
+    r = _run("backup", "--db", str(src), "--out", str(out), "--storage", str(storage),
+             "--allow-partial")
+    assert r.returncode == 3, r.stdout + r.stderr  # 可区分的部分成功
+    assert "部分备份完成" in r.stdout
+    assert "退出码 3" in r.stdout or "部分" in r.stdout
+
+
+def test_backup_with_corrupted_attachment_fails_strict(tmp_path):
+    """F02：同名但字节已损坏 → sha256 不符 → 默认失败，而不是照常「完成」。"""
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "live.db", storage, corrupt_last=True)
+    r = _run("backup", "--db", str(src), "--out", str(tmp_path / "out"),
+             "--storage", str(storage))
+    assert r.returncode != 0 and "不符" in r.stdout + r.stderr
+
+
+def test_backup_with_missing_storage_dir_fails_strict_and_partial_exits_3(tmp_path):
     storage = tmp_path / "ghost-storage"
     storage.mkdir()
     src = _db_with_attachments(tmp_path / "live.db", storage)
     shutil.rmtree(storage)  # 库里有元数据、字节目录被整目录删掉的情形
     out = tmp_path / "out"
-    r = _run("backup", "--db", str(src), "--out", str(out))
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "字节未入备份包" in r.stderr
-    assert not (out / "attachments").exists()
 
+    r = _run("backup", "--db", str(src), "--out", str(out), "--storage", str(storage))
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "不是一份完整备份" in r.stdout + r.stderr
+
+    out2 = tmp_path / "out2"
+    r2 = _run("backup", "--db", str(src), "--out", str(out2), "--storage", str(storage),
+              "--allow-partial")
+    assert r2.returncode == 3, r2.stdout + r2.stderr
+
+
+# ------------------------------- restore (F02) ------------------------------
 
 def test_restore_reports_attachment_coverage_hint(tmp_path):
+    """完整附件随包恢复：字节从备份包补入目标字节目录。"""
     storage = tmp_path / "storage"
     storage.mkdir()
-    src = _db_with_attachments(tmp_path / "backup.db", storage)
-    dst = _schema_db(tmp_path / "data.db")
-    r = _run("restore", "--src", str(src), "--dst", str(dst),
-             "--storage", str(storage), "--server-stopped", "--yes")
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    src = _db_with_attachments(pkg / "backup.db", storage, rows=("a1",))
+    out = tmp_path / "out"
+    r = _run("backup", "--db", str(src), "--out", str(out), "--storage", str(storage))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "1 条元数据" not in r.stdout  # rows=2
-    assert "2 条元数据" in r.stdout and "命中 1 个文件" in r.stdout
-    assert "随备份包一起恢复" in r.stdout
+    srcdb = next(out.glob("researchmap-*.db"))
+    dst = _schema_db(tmp_path / "data.db", rows=(("p9", "被换掉的旧库", 42),))
+    tar_storage = tmp_path / "tar-storage"
+    tar_storage.mkdir()
+
+    r = _run("restore", "--src", str(srcdb), "--dst", str(dst),
+             "--storage", str(tar_storage), "--server-stopped", "--yes")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "1 条元数据，1 个文件逐字节核对通过" in r.stdout
+    assert "恢复完成" in r.stdout
+    assert (tar_storage / "a1").read_bytes() == ATT_PNG  # 字节从备份包补入
+
+
+def _run_restore(args, cwd=None):
+    return subprocess.run([sys.executable, str(BACKUP), "restore", *args],
+                          capture_output=True, text=True, cwd=cwd)
 
 
 # ------------------------------- restore gate -------------------------------
@@ -258,3 +331,64 @@ def test_restore_replaces_the_target_and_clears_a_stale_wal(tmp_path):
     finally:
         con.close()
     assert _run("verify", str(dst)).returncode == 0
+
+
+def test_restore_with_missing_attachment_aborts_and_leaves_target_untouched(tmp_path):
+    """F02：附件缺件 → 替换目标库**之前**中止；旧库字节原位不动。"""
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "backup.db", storage)  # a2 无文件
+    (storage / "a2").unlink()
+    dst = _schema_db(tmp_path / "data.db", rows=(("p9", "后来的生产数据", 42),))
+
+    r = _run("restore", "--src", str(src), "--dst", str(dst),
+             "--storage", str(storage), "--server-stopped", "--yes")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "恢复中止" in r.stdout + r.stderr
+    assert "目标库未被改动" in r.stdout + r.stderr
+    con = sqlite3.connect(dst)
+    try:
+        assert con.execute("SELECT id, revision FROM projects").fetchall() == [("p9", 42)]
+    finally:
+        con.close()
+    assert not list(tmp_path.glob("data.db.pre-restore-*"))
+
+
+def test_restore_with_missing_attachment_allow_partial_exits_3(tmp_path):
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    src = _db_with_attachments(tmp_path / "backup.db", storage)
+    (storage / "a2").unlink()
+    dst = _schema_db(tmp_path / "data.db", rows=(("p9", "旧", 42),))
+
+    r = _run("restore", "--src", str(src), "--dst", str(dst),
+             "--storage", str(storage), "--server-stopped", "--yes", "--allow-partial")
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "部分恢复完成" in r.stdout
+    assert "退出码 3" in r.stdout  # 只是不中止，仍不算完整成功
+
+
+def test_restore_with_corrupted_package_attachment_aborts(tmp_path):
+    """F02：备份包里同名但字节损坏 → 核对不过 → 中止，目标库不动。"""
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    src = _db_with_attachments(pkg / "backup.db", storage, corrupt_last=True)
+    out = tmp_path / "out"
+    r = _run("backup", "--db", str(src), "--out", str(out), "--storage", str(storage),
+             "--allow-partial")
+    assert r.returncode == 3, r.stdout + r.stderr
+    srcdb = next(out.glob("researchmap-*.db"))
+    dst = _schema_db(tmp_path / "data.db", rows=(("p9", "旧", 42),))
+
+    r = _run("restore", "--src", str(srcdb), "--dst", str(dst),
+             "--storage", str(tmp_path / "tar-storage"), "--server-stopped", "--yes")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "恢复中止" in r.stdout + r.stderr
+    assert "a2" in r.stdout + r.stderr  # 坏件未被入包，恢复侧按缺件中止
+    con = sqlite3.connect(dst)
+    try:
+        assert con.execute("SELECT id FROM projects").fetchall() == [("p9",)]
+    finally:
+        con.close()
