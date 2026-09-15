@@ -263,3 +263,35 @@ test("A03/R03 分支视图：折叠→只看这一分支→展开，仍落在可
   await expect(page.locator(".breadcrumbs")).toHaveCount(0); // 分支视图已退出
   await expect.poll(cardCount).toBe(total);
 });
+
+/* F08：大图概览的「真正可见」路线入口。
+ *
+ * 1104 节点级地图上拖动 Fit View，zoom 落在概览档，但四条一级路线的投影
+ * 标签全部在屏幕外（top ≈ -5401…6215）——DOM 里有标签不等于用户能看到。
+ * 修复 = 概览档固定出现的「路线导航」栏：每条可见一级路线一行，点击放大
+ * 定位；验收即「适应全图 → 导航栏仍在屏幕内 → 点击路线 3 落在可读缩放」。 */
+test("F08 大图概览：固定路线导航栏可见，点击条目放大定位到该路线", async ({ page }) => {
+  const { pid, routeTitles } = await seedBigTree(page);
+  await enterStudio(page, pid);
+
+  // 全展开 + 适应全图：这次会把 244 张卡整体缩小，概览档启动
+  await page.getByTestId("vt-expand-all").click();
+  await page.getByRole("button", { name: "⋯" }).click();
+  // 顶栏菜单项是 .pop-item（非 button role）
+  await page.locator(".pop-item", { hasText: "适应当前图" }).click();
+
+  const rail = page.getByTestId("route-rail");
+  await expect(rail).toBeVisible({ timeout: 15_000 });
+  // 每条一级路线都有入口，无论其投影标签在不在屏幕内
+  for (const title of routeTitles) {
+    await expect(rail.getByRole("button", { name: title })).toBeVisible();
+  }
+
+  // 点击第 3 条路线：放大定位到可读缩放，概览层（含导航栏）随之卸载
+  await rail.getByRole("button", { name: "压测路线3" }).click();
+  await expect(rail).toBeHidden({ timeout: 15_000 });
+  const card = page.locator(".rm-card", { hasText: "压测路线3" }).first();
+  const box = await card.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width, "定位后的路线卡达到可读宽度").toBeGreaterThanOrEqual(MIN_READABLE_CARD_PX);
+});

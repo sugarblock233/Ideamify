@@ -582,6 +582,29 @@ button.chip.ver-chip.on {
 }
 .ov-label.ov-selected:hover b { color: #fff; }
 
+/* F08 fixed route rail: screen-space navigation into the top-level routes —
+   on a fitted 1104-node map every projected label can be off-screen, this
+   panel is the always-visible entry (overview tier only). */
+.ov-rail {
+  position: absolute; top: 10px; left: 10px; pointer-events: auto;
+  width: 200px; max-width: 40%;
+  background: rgba(255, 255, 255, .95); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(20, 30, 50, .14);
+  display: flex; flex-direction: column;
+}
+.ov-rail-head {
+  border: 0; background: none; cursor: pointer; text-align: left;
+  font-size: 12px; font-weight: 600; color: var(--ink);
+  padding: 5px 8px; border-bottom: 1px solid var(--line);
+}
+.ov-rail-list { overflow-y: auto; max-height: 40vh; padding: 2px 0; }
+.ov-rail-item {
+  display: block; width: 100%; border: 0; background: none; cursor: pointer;
+  text-align: left; font-size: 12px; line-height: 17px; color: var(--ink);
+  padding: 2px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ov-rail-item:hover { background: var(--sel); color: #fff; }
+
 /* status legend chip (canvas bottom-left, above the relation hint) */
 .legend { position: absolute; left: 12px; bottom: 18px; z-index: 30; }
 .legend > button {

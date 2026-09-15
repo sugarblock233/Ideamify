@@ -6,6 +6,10 @@
  *  - one label per visible top-level route, sorted by (depth, order) with a
  *    deterministic push-down AABB resolution (identical inputs always
  *    produce the identical label layout);
+ *  - F08 固定路线导航: a screen-fixed collapsible rail listing every visible
+ *    top-level route — the projected labels can all sit off-screen on a
+ *    1104-node map fitted to view, and the rail is the always-visible entry
+ *    point into them (click = zoom/center that route);
  *  - a floating label pinned to the selected node with a 「放大定位」 button;
  *  - hover keeps the node's full title as a native tooltip.
  *
@@ -64,6 +68,9 @@ export default function OverviewLabels(p: {
 }) {
   const t = useT();
   const tf = useTransform();
+  // F08: the fixed route rail starts expanded; the collapse persists for the
+  // canvas mount (not a view pref — it is navigation chrome, not data).
+  const [railOpen, setRailOpen] = useState(true);
 
   // Deterministic de-overlap: sort by (depth, order), then push any label
   // down until its box no longer overlaps a previously placed one. Same
@@ -88,8 +95,40 @@ export default function OverviewLabels(p: {
     placed.push({ x, y, w, it });
   }
 
+  const railItems = [...p.items].sort(
+    (a, b) => a.depth - b.depth || a.order - b.order || a.id.localeCompare(b.id),
+  );
   return (
     <div className="ovlayer" data-testid="overview-layer">
+      {p.items.length > 0 && (
+        <div className="ov-rail" data-testid="route-rail">
+          <button
+            className="ov-rail-head"
+            title={t("b1.rail.toggle.title")}
+            onClick={() => setRailOpen((v) => !v)}
+          >
+            {railOpen ? "▾" : "▸"} {t("b1.rail.title", { n: p.items.length })}
+          </button>
+          {railOpen && (
+            <div className="ov-rail-list">
+              {railItems.map((it) => (
+                <button
+                  key={it.id}
+                  className="ov-rail-item"
+                  data-testid={`rail-route-${it.id.slice(0, 8)}`}
+                  title={it.title}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    p.onZoomIn(it.id);
+                  }}
+                >
+                  {it.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {placed.map((b) => (
         <span
           key={b.it.id}
