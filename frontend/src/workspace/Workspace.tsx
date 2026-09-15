@@ -14,6 +14,7 @@ import {
   ApiError,
   type CommitItem,
   type CommitOp,
+  type CommitRequest,
   type CommitResponse,
   type GraphNode,
   type NodeFull,
@@ -68,6 +69,10 @@ interface NodeDraftSession {
   fields: Draft;
   err: string | null;
   busy: boolean;
+  /** F03: the FULL request body frozen at the first send (idempotency is
+   *  request-body-wide, not just the id). An ambiguous outcome retries this
+   *  verbatim; edits from after the send ride on top as a follow-up update. */
+  sent?: { body: CommitRequest; fields: Draft } | null;
 }
 
 const draftEmpty: Draft = {
@@ -938,7 +943,9 @@ async function rebaseDraft() {
     if (!s || s.busy) return;
     const f = s.fields;
     const title = f.title.trim();
-    if (!title) return;
+    // F03: a frozen send replays verbatim regardless of what the editor holds
+    // now — the outcome of the original send is unknown until it replays.
+    if (!title && !s.sent) return;
     // A06: supported / not_supported 需要 scope / finding / decision + ≥1 证据
     // （与服务端 _check_confirmed 同一闸口，前端先行拦截；与旧弹窗一致，非门控
     // 字段填了也带上）。
@@ -964,27 +971,52 @@ async function rebaseDraft() {
     if (evs.length > 0) op.evidence = evs.map((e) => ({ ...e }));
     // E 批 §7：科研版本归属仅在用户勾选时随创建提交（省略 = 未分配）
     if (f.version_ids.length > 0) op.version_ids = [...f.version_ids];
-    setNodeDraft({ ...s, busy: true, err: null });
-    try {
-      const res = await api.commit(pid, {
+    // F03: freeze the full request body on the first send — request_id pinned
+    // alone is NOT idempotency, because a retry that rebuilds the body from a
+    // refreshed revision (or a switched language) produces a different hash
+    // and the server rightly refuses it. The frozen body replays byte-identical
+    // and the server resolves idempotency BEFORE the revision check, so a lost
+    // success receipt replays to the stored result.
+    const frozen = s.sent ?? null;
+    const send: NonNullable<NodeDraftSession["sent"]> = frozen ?? {
+      body: {
         request_id: s.requestId,
-        // A05: pinned request id — a network retry re-sends the identical
-        // request, and an ambiguous outcome resolves to one node at most.
         expected_revision: projRef.current?.revision ?? 0,
         summary: t(s.parentId ? "ws.summary.create.child" : "ws.summary.create.root", { title }),
         client_label: "researchmap-ui",
         operations: [op],
-      });
+      },
+      fields: s.fields,
+    };
+    // busy/freeze via functional updates: a fill typed while the request is in
+    // flight must not be clobbered by this click's session snapshot.
+    setNodeDraft((cur) => (cur ? { ...cur, busy: true, err: null, ...(cur.sent ? {} : { sent: send }) } : cur));
+    try {
+      const res = await api.commit(pid, send.body);
+      // 成功（含丢失回执后的重放）：草稿收束为正式节点
       setNodeDraft(null);
       setProject((p) => (p ? { ...p, revision: res.revision } : p));
       await syncAll();
+      // F03: edits made after the frozen send are follow-up modifications —
+      // never a new payload pushed under the frozen create's request id.
+      // Diff against the session snapshot taken at THIS click: the session in
+      // state has already been collapsed to null here, and every fill that
+      // survived the error write-back is in it.
+      if (frozen) {
+        const changed = diffDraft(frozen.fields, s.fields);
+        if (Object.keys(changed).length > 0) {
+          const ut = title || String(changed.title ?? "").trim();
+          await commit([{ op: "node.update", id: s.id, fields: changed }],
+            t("ws.summary.update", { title: ut || s.id }));
+        }
+      }
       ironToast(t("ws.created.rev", { v: res.revision }), "ok");
       void selectNode(s.id, { locate: true });
     } catch (e) {
       if (e instanceof ApiError && e.code === "REVISION_CONFLICT") {
-        // Someone else moved the graph: refetch quietly, keep the draft for a
-        // fresh retry (a create carries no per-field conflict to resolve).
-        setNodeDraft({ ...s, busy: false, err: t("ws.conflict.toast") });
+        // F03: authoritative non-application → unfreeze and re-baseline; the
+        // next save builds a fresh request against the new revision.
+        setNodeDraft((cur) => (cur ? { ...cur, busy: false, err: t("ws.conflict.toast"), sent: null } : cur));
         void syncAll();
       } else {
         let msg: string;
@@ -994,7 +1026,10 @@ async function rebaseDraft() {
         } else {
           msg = String(e);
         }
-        setNodeDraft({ ...s, busy: false, err: msg });
+        // F03: unknown outcome (network error, 5xx, ...) — KEEP the frozen
+        // body; the retry replays it instead of proving a new one. Functional
+        // update so a fill typed mid-flight survives the error write-back.
+        setNodeDraft((cur) => (cur ? { ...cur, busy: false, err: msg } : cur));
         ironToast(e instanceof ApiError ? e.message : t("ws.create.fail"), "err");
       }
     }

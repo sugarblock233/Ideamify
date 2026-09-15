@@ -7,6 +7,8 @@
  *  - 横→纵→大纲来回切换草稿会话存活（侧栏表单与画布卡/大纲虚线行同源）；
  *  - 409（他人先提交）后草稿保留、重存成功；断网保存失败草稿保留、恢复后
  *    重存成功；
+ *  - F03：保存成功但回执丢失（合成 503）→ 重试重放冻结的完整请求体收束；
+ *    冻结期的新编辑作为后续 node.update 提交；
  *  - 编辑草稿的节点卡片带 未保存 徽标（§10.2）。
  *
  *  注意：空图不渲染虚拟根卡（layout 在 0 节点时为空），画布草稿卡也无处安
@@ -269,4 +271,42 @@ test("编辑草稿的节点卡片带 未保存 徽标（§10.2），保存后消
   await page.getByRole("button", { name: "保存" }).click();
   await expect(page.getByRole("button", { name: "保存" })).toBeDisabled({ timeout: 10_000 });
   await expect(page.locator(".unsaved-badge")).toHaveCount(0);
+});
+
+test("F03: 保存成功但回执丢失——重放冻结请求收束，冻结期新编辑成后续修改", async ({ page }) => {
+  const { pid, rev } = await makeProject(page);
+  const rev2 = await seedRoute(page, pid, rev, "既有一级路线");
+  await enterStudio(page, pid);
+  await page.waitForSelector(".rm-card");
+
+  const panel = await openRootDraft(page);
+  const form = panel.locator(".editform");
+  await form.locator("input").first().fill("回执丢失仍能收束的路线");
+
+  // 服务器_COMMIT 成功，但浏览器收到合成 503（成功回执丢失）
+  await page.route("**/commits", async (route) => {
+    if (route.request().method() !== "POST") return route.continue_();
+    await page.request.fetch(route.request()); // 服务器实际入库
+    await route.fulfill({ status: 503, body: "synthetic lost receipt", contentType: "text/plain" });
+  });
+  await panel.getByRole("button", { name: "创建" }).click();
+  await expect(page.locator(".rm-draft")).toHaveCount(1); // 结果不明 → 草稿保留
+
+  // 失败后继续编辑（改摘要）——旧实现会在重试时因 payload 变化被
+  // 「request_id 已被不同的提交内容使用」卡死
+  await form.locator("textarea").first().fill("冻结期补写的摘要");
+  await page.unroute("**/commits");
+
+  // 重试：重放冻结的完整请求体（幂等回执），收束草稿；新编辑随后跟进
+  await panel.getByRole("button", { name: "创建" }).click();
+  await expect(page.locator(".rm-card", { hasText: "回执丢失仍能收束的路线" })).toHaveCount(1, { timeout: 15_000 });
+
+  // 服务器恰好两条提交：创建 + 后续 node.update（摘要）
+  const revNow = (await api(page, "GET", `/api/v1/projects/${pid}`)).json.revision as number;
+  expect(revNow).toBe(rev2 + 2);
+  const nid = (await api(page, "GET", `/api/v1/projects/${pid}/graph`)).json.nodes
+    .find((n: { title: string }) => n.title === "回执丢失仍能收束的路线").id as string;
+  const node = (await api(page, "GET", `/api/v1/projects/${pid}/nodes/${nid}`)).json;
+  expect(node.summary).toBe("冻结期补写的摘要");
+  await expect(page.locator(".hint.err", { hasText: "已被不同的提交内容" })).toHaveCount(0);
 });
