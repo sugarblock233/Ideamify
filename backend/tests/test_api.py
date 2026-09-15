@@ -21,6 +21,7 @@ TOKENS = '{"researcher": "researcher-token-0001", ' \
 
 def test_api_smoke(tmp_path, monkeypatch):
     # Values must match the TOK table inside api_smoke.py (auth checks).
+    monkeypatch.setenv("RESEARCHMAP_AUTH_MODE", "token")
     monkeypatch.setenv("RESEARCHMAP_DB", str(tmp_path / "api_smoke.db"))
     monkeypatch.setenv("RESEARCHMAP_TOKENS", TOKENS)
     monkeypatch.setenv("RESEARCHMAP_STATIC", "")

@@ -8,7 +8,7 @@ replace its content with your own question when you start a real project.
 
 ## 1. Create a project around a question
 
-Enter your researcher token. On a fresh instance, fill in the project name
+Local mode opens the project manager without login. On a fresh instance, fill in the project name
 and research objective, then choose **创建项目**. For example:
 
 - Name: “Literature retrieval strategies”
@@ -154,7 +154,7 @@ field require your choice before saving; unrelated edits can be merged.
 
 Save your edits before closing. The browser warns on ordinary reload or
 navigation while a node draft is dirty, but this is not crash recovery or
-autosave. Reloading requires the token again. The project stays on the server.
+autosave. Local mode reloads without login. Token mode requires the token again. The project stays on the server.
 
 When a leaf node is no longer useful, archive it instead of deleting history.
 Use **⋯ → 显示已归档节点** to find it and restore it. Before upgrades, follow

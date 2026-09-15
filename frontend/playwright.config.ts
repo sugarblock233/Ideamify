@@ -11,6 +11,8 @@ const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 
 export default defineConfig({
   testDir: "./e2e",
+  testMatch: process.env.E2E_AUTH_MODE === "local" ? "**/dashboard.spec.ts" : "**/*.spec.ts",
+  testIgnore: process.env.E2E_AUTH_MODE === "local" ? undefined : "**/dashboard.spec.ts",
   timeout: 45_000,
   retries: 0,
   workers: 1,
@@ -25,6 +27,7 @@ export default defineConfig({
   webServer: {
     command: `mkdir -p ${quote(E2E_DB_DIR)} && ${quote(E2E_PYTHON)} -m uvicorn app.main:app --app-dir ../backend --host 127.0.0.1 --port ${PORT}`,
     env: {
+      RESEARCHMAP_AUTH_MODE: process.env.E2E_AUTH_MODE ?? "token",
       RESEARCHMAP_STATIC: path.resolve("dist"),
       RESEARCHMAP_DB: path.join(E2E_DB_DIR, "data.db"),
       // Synthetic actors used for browser/AI collaboration tests.

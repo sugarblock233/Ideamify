@@ -8,6 +8,15 @@ migration steps will be noted here.
 
 ### Added
 
+- Local single-user project manager as the default entry: no login or token
+  setup, searchable project cards, recent/name sorting, creation and return
+  from maps with unsaved-draft protection. Project lists include every API page.
+- Explicit `RESEARCHMAP_AUTH_MODE=token` for protected remote deployments;
+  local mode keeps the loopback-only Compose binding and checks browser Host,
+  Origin and write headers. The CLI can access local projects without a token;
+  optional named bearer credentials still preserve AI actor attribution.
+  No authentication cookies, stored browser credentials or database migration.
+
 - Markdown **tables** in node details: GFM table rendering with a
   container-scoped horizontal scroll for wide tables, and an「插入表格」
   template button in the editor.

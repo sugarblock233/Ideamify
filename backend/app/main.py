@@ -1,6 +1,6 @@
 """FastAPI application (SPEC 9).
 
-- All project data, export and even the OpenAPI schema require a bearer token;
+- All project data, export and even the OpenAPI schema use the access guard;
   only /healthz and the static shell are public.
 - Unknown /api/* paths return JSON 404 — never the SPA HTML (SPEC 7).
 - In production the built frontend is served same-origin from this process.
@@ -44,7 +44,7 @@ def create_app() -> FastAPI:
         allow_origins=list(settings.allowed_cors_origins),
         allow_credentials=False,          # 无 Cookie，令牌走 Authorization 头
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["authorization", "content-type"],
+        allow_headers=["authorization", "content-type", "x-researchmap-request"],
         max_age=600,
     )
 
@@ -62,7 +62,10 @@ def create_app() -> FastAPI:
                         content={"error": {"code": "REQUEST_TOO_LARGE",
                                            "message": "请求体超过 2 MiB 上限", "details": {}}},
                     )
-        return await call_next(request)
+        response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     register_error_handlers(app)
 

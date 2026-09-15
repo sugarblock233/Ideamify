@@ -57,6 +57,8 @@ interface WorkspaceProps {
   onChangeProject: (pid: string) => void;
   refreshProjectList: (list: ProjectLite[]) => void;
   onExit: () => void;
+  onHome: () => void;
+  localMode: boolean;
 }
 
 /** C2: a node-create draft session. `fields` reuses the shared Draft shape so
@@ -116,6 +118,8 @@ export default function Workspace({
   onChangeProject,
   refreshProjectList,
   onExit,
+  onHome,
+  localMode,
 }: WorkspaceProps) {
   const t = useT();
   const [project, setProject] = useState<Project | null>(null);
@@ -1221,6 +1225,11 @@ async function rebaseDraft() {
   return (
     <div className="app">
       <TopBar
+        localMode={localMode}
+        onHome={() => {
+          if (!confirmLeaveDraft(t("dashboard.return"))) return;
+          onHome();
+        }}
         actor={actor}
         appVersion={appVersion}
         project={project}
@@ -1511,7 +1520,7 @@ async function rebaseDraft() {
         />
       )}
       {aiAccessOpen && project && (
-        <AiAccessModal project={project} pid={pid} onClose={() => setAiAccessOpen(false)} onToast={ironToast} />
+        <AiAccessModal localMode={localMode} project={project} pid={pid} onClose={() => setAiAccessOpen(false)} onToast={ironToast} />
       )}
       {verMgrOpen && (
         <VersionManagerModal
@@ -1657,6 +1666,7 @@ function CreateRelationModal({
 }
 
 function AiAccessModal({
+  localMode,
   project,
   pid,
   onClose,
@@ -1664,20 +1674,21 @@ function AiAccessModal({
 }: {
   project: Project;
   pid: string;
+  localMode: boolean;
   onClose: () => void;
   onToast: (msg: string, kind?: "ok" | "err") => void;
 }) {
   const t = useT();
   const origin = window.location.origin;
   const block = [
-    t("ai.line.server", { origin }),
+    t(localMode ? "ai.local.server" : "ai.line.server", { origin }),
     t("ai.line.name", { name: project.name }),
     t("ai.line.id", { pid }),
-    t("ai.line.actor"),
+    t(localMode ? "ai.local.actor" : "ai.line.actor"),
     "",
-    t("ai.section.setup"),
+    t(localMode ? "ai.local.setup" : "ai.section.setup"),
     `export RESEARCHMAP_BASE_URL="${origin}"`,
-    t("ai.line.token.export"),
+    ...(localMode ? [] : [t("ai.line.token.export")]),
     "",
     t("ai.section.read"),
     `python3 tools/researchmap.py context ${pid}`,
@@ -1703,7 +1714,7 @@ function AiAccessModal({
   ].join("\n");
   return (
     <Modal title={t("topbar.menu.ai")} onClose={onClose}>
-      <p className="muted">{t("ai.intro")}</p>
+      <p className="muted">{t(localMode ? "ai.local.intro" : "ai.intro")}</p>
       <pre className="aiaccess-pre">{block}</pre>
       <div className="mrow">
         <button

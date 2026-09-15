@@ -36,6 +36,8 @@ export interface TopBarSearch {
 }
 
 export interface TopBarProps {
+  onHome: () => void;
+  localMode: boolean;
   actor: string | null;
   appVersion: string | null;
   project: Project | null;
@@ -192,7 +194,7 @@ export default function TopBar(p: TopBarProps) {
 
   const connText = (
     <>
-      {p.actor ? t("topbar.actor", { actor: p.actor }) : "…"}
+      {p.localMode ? t("dashboard.local") : p.actor ? t("topbar.actor", { actor: p.actor }) : "…"}
       {p.appVersion ? t("topbar.conn.version", { v: p.appVersion }) : ""}
       {p.project ? t("topbar.conn.project", { v: p.project.revision }) : ""}
     </>
@@ -200,7 +202,9 @@ export default function TopBar(p: TopBarProps) {
 
   return (
     <div className={`topbar${tier === "full" ? "" : ` tier-${tier}`}`} ref={barRef}>
-      <span className="brand">ResearchMap</span>
+      <button className="brand home-button" onClick={p.onHome} title={t("dashboard.return")} aria-label={t("dashboard.return")}>
+        <span aria-hidden="true">‹ </span>ResearchMap
+      </button>
 
       <select
         className="project-sel"
@@ -273,9 +277,9 @@ export default function TopBar(p: TopBarProps) {
                 <div className="pop-item dotmenu-line" onClick={() => { setMenuOpen(false); p.onManualRefresh(); }}>
                   {t("topbar.refresh")}
                 </div>
-                <div className="pop-item" onClick={() => { setMenuOpen(false); p.onExit(); }} title={t("topbar.exit.title")}>
+                {!p.localMode && <div className="pop-item" onClick={() => { setMenuOpen(false); p.onExit(); }} title={t("topbar.exit.title")}>
                   {t("topbar.exit")}
-                </div>
+                </div>}
               </>
             )}
             {p.project && (
@@ -345,11 +349,11 @@ export default function TopBar(p: TopBarProps) {
       )}
 
       {tier === "full" && (
-        <span className="conn" title={t("topbar.actor.title")}>
+        <span className="conn" title={t(p.localMode ? "dashboard.local" : "topbar.actor.title")}>
           {connText}
         </span>
       )}
-      {tier === "full" && (
+      {tier === "full" && !p.localMode && (
         <button onClick={p.onExit} title={t("topbar.exit.title")}>{t("topbar.exit")}</button>
       )}
     </div>

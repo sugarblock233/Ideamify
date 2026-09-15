@@ -10,7 +10,7 @@ command line, in files, URLs or logs (SPEC 7.3 / A05):
   RESEARCHMAP_BASE_URL   server base URL       (default: http://127.0.0.1:8000)
   RESEARCHMAP_URL        SPEC alias — consulted only when RESEARCHMAP_BASE_URL
                          is unset (RESEARCHMAP_BASE_URL wins)
-  RESEARCHMAP_TOKEN      bearer access token   (required for every /api/* command)
+  RESEARCHMAP_TOKEN      bearer access token   (required in token mode; optional locally)
   An explicit --base flag (subcommand level) overrides both base-URL vars.
 
 Output contract (stable for automation):
@@ -28,7 +28,7 @@ Output contract (stable for automation):
                                        # e.g. identity fields written back
            Chinese may appear inside string fields; the structure is fixed.
   exit     0  success (HTTP 2xx)
-           1  local / usage error (bad file, missing token, argparse)
+           1  local / usage error (bad file, argparse)
            2  HTTP 409 conflict (REVISION_CONFLICT, IDEMPOTENCY_KEY_REUSED,
               DUPLICATE_RELATION, PAGINATION_STALE)
            3  HTTP 422 validation (request body / parameters)
@@ -76,7 +76,7 @@ TIMEOUT = 30
 
 # Exit codes (documented in --help and docs/AI_USAGE.md)
 EXIT_OK = 0
-EXIT_LOCAL = 1      # local/usage error: unreadable file, missing token, argparse
+EXIT_LOCAL = 1      # local/usage error: unreadable file, argparse
 EXIT_CONFLICT = 2   # HTTP 409
 EXIT_VALIDATION = 3  # HTTP 422
 EXIT_SERVER = 4     # network failure or HTTP 5xx/503
@@ -85,7 +85,7 @@ EXIT_HTTP = 5       # any other non-2xx
 EPILOG = """\
 exit codes
   0  success (HTTP 2xx)
-  1  local/usage error (bad ops file, missing RESEARCHMAP_TOKEN, argparse)
+  1  local/usage error (bad ops file, argparse)
   2  HTTP 409 conflict (REVISION_CONFLICT / IDEMPOTENCY_KEY_REUSED / …)
   3  HTTP 422 validation (request body / parameters)
   4  network failure, or HTTP 5xx (server down, DB_BUSY — retryable)
@@ -142,7 +142,7 @@ def call_api(client: Client, method: str, path: str,
     """One HTTP round-trip. Returns (status, parsed-body). NetError on
     connection failure / timeout (no usable status)."""
     url = client.base + path
-    headers = {"accept": "application/json"}
+    headers = {"accept": "application/json", "x-researchmap-request": "1"}
     if client.token:
         headers["authorization"] = f"Bearer {client.token}"
     data = None
@@ -317,10 +317,6 @@ def resolve_base(args) -> str:
 
 def make_client(args) -> Client:
     token = os.environ.get("RESEARCHMAP_TOKEN", "").strip()
-    if not token:
-        fail_local("MISSING_TOKEN",
-                   "缺少访问令牌：请设置环境变量 RESEARCHMAP_TOKEN"
-                   "（按合同，令牌不接受出现在命令行参数、文件或日志中）。")
     return Client(resolve_base(args), token)
 
 

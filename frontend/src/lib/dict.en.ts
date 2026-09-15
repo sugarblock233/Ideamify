@@ -4,6 +4,28 @@
 import type { zh } from "./dict.zh";
 
 export const en: Record<keyof typeof zh, string> = {
+  // ---- Project dashboard ---------------------------------------------------
+  "dashboard.eyebrow": "RESEARCH WORKSPACE",
+  "dashboard.title": "My research projects",
+  "dashboard.subtitle": "Open a project to continue recording ideas, experiments and findings.",
+  "dashboard.new": "+ New project",
+  "dashboard.close.create": "Close creation form",
+  "dashboard.search": "Search projects or research objectives",
+  "dashboard.sort": "Sort projects",
+  "dashboard.recent": "Recently updated",
+  "dashboard.name": "By name",
+  "dashboard.count": "Showing {n} of {total} projects",
+  "dashboard.empty.hint": "Start your first ResearchMap with a research objective.",
+  "dashboard.no.matches": "No matching projects",
+  "dashboard.clear": "Clear search",
+  "dashboard.enter": "Enter project: {name}",
+  "dashboard.updated": "Updated {time}",
+  "dashboard.open.map": "Open map",
+  "dashboard.return": "Back to projects",
+  "dashboard.loading": "Opening your workspace…",
+  "dashboard.retry": "Retry connection",
+  "dashboard.local": "Local · No login",
+
   // ---- TokenGate -----------------------------------------------------------
   "gate.subtitle": "Lightweight research evolution map · enter your access token to open the workspace",
   "gate.token.placeholder": "Access token (Bearer token)",
@@ -167,6 +189,10 @@ export const en: Record<keyof typeof zh, string> = {
   "modal.rel.note": "Creating supports / contradicts never changes any node status; only researchers set statuses explicitly.",
 
   // ---- AiAccessModal ------------------------------------------------------------------
+  "ai.local.server": "Server: {origin} (local, no login)",
+  "ai.local.actor": "Identity: local requests use researcher; optional named tokens distinguish AI authors",
+  "ai.local.setup": "# Local setup (RESEARCHMAP_TOKEN is optional for named actors)",
+  "ai.local.intro": "Local AI clients and the browser share the same commit protocol. No access token or model API key is required.",
   "ai.intro": "AI tools use the same commit protocol as the browser and need no model API key; every token holder is part of the same trusted space.",
   "ai.line.server": "Server: {origin} (Authorization: Bearer <your token>)",
   "ai.line.name": "Project name: {name}",

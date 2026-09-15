@@ -105,6 +105,7 @@ def server(tmp_path_factory):
     port = _free_port()
     env = {**os.environ,
            "RESEARCHMAP_DB": str(d / "data.db"),
+           "RESEARCHMAP_AUTH_MODE": "local",
            "RESEARCHMAP_TOKENS": json.dumps({"cli-test": TOKEN}),
            "RESEARCHMAP_STATIC": ""}
     env.pop("RESEARCHMAP_CORS_ORIGINS", None)
@@ -276,3 +277,11 @@ def test_versions_lists_research_version_labels(server, project, tmp_path):
     r2 = run_cli(server, "versions", project, "--text")
     assert r2.returncode == 0, r2.stderr
     assert "第一轮" in r2.stdout and "v1" in r2.stdout and "第二轮" in r2.stdout
+
+
+def test_local_cli_creates_without_token(server):
+    env = {**os.environ, "RESEARCHMAP_BASE_URL": server, "RESEARCHMAP_TOKEN": ""}
+    r = subprocess.run([sys.executable, str(CLI), "create-project", "Synthetic local CLI", "No-token regression"],
+                       env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["id"]

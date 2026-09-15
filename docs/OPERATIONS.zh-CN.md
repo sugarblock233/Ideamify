@@ -4,6 +4,10 @@
 
 以下命令都在启动实例时使用的仓库目录运行，保留对应的 `.env`。继续使用同一个 Compose 项目名：实际的 `researchmap-data` 卷名带有项目名前缀。更换项目名可能创建另一个空卷，看起来像“数据不见了”。
 
+默认本机免登录模式必须保留回环监听。需要远程入口时先设
+`RESEARCHMAP_AUTH_MODE=token` 并配置 `RESEARCHMAP_TOKENS`；缺失令牌会拒绝启动。
+切换模式后用 `docker compose up -d --build` 重建服务。
+
 ## 检查、停止和启动
 
 ```bash

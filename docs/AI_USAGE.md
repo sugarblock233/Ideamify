@@ -7,7 +7,7 @@
 > it and `SPEC.md` diverge on naming, the SPEC aliases are supported (§1.1–1.2).
 
 You (an external AI) share **one server** with a researcher. You need **no
-browser, no database file, no model API key** — you need one access token and
+browser, no database file, no model API key** — token mode needs an access token and
 the CLI. Every write lands on the same commit endpoint and honors the same
 conflict rules as the web UI. All quoted sample data in this repo is synthetic.
 
@@ -21,7 +21,7 @@ conflict rules as the web UI. All quoted sample data in this repo is synthetic.
 |---|---|---|
 | `RESEARCHMAP_BASE_URL` | no (default `http://127.0.0.1:8000`) | Server base URL. Wins over `RESEARCHMAP_URL`. |
 | `RESEARCHMAP_URL` | no | SPEC alias — used only when `RESEARCHMAP_BASE_URL` is unset. |
-| `RESEARCHMAP_TOKEN` | yes for every `/api/*` command | Bearer access token. **Environment only**: by contract the token never appears in command arguments, files, URLs or logs. There is deliberately **no `--token` flag**. |
+| `RESEARCHMAP_TOKEN` | required in token mode; optional locally | Bearer access token. **Environment only**: by contract the token never appears in command arguments, files, URLs or logs. There is deliberately **no `--token` flag**. |
 
 A subcommand-level `--base <url>` exists as a convenience override of the
 base URL (not a credential).
@@ -37,7 +37,11 @@ rmcli health      # no token needed; server reachable?
 rmcli session     # your identity: {"actor": "<token name>", "app_version": "…"}
 ```
 
-Identity: the `actor` recorded on every write is the **token name**, decided
+In local mode, omit `RESEARCHMAP_TOKEN` to use the `researcher` identity. The CLI
+sends the local write header automatically. Configure named tokens when AI
+attribution is needed; all clients still use the same commit protocol.
+
+Identity when using a token: the `actor` recorded on every write is the **token name**, decided
 server-side. A commit's `client_label` field is a self-attested display label
 only — it is never authoritative identity, and there is **no project-level
 authorization**: every valid token operates on all projects in the same
@@ -323,7 +327,8 @@ in the §1.3 object and maps the exit code.
 | (`UNAUTHORIZED`) | 401 | Bad/missing token; check `RESEARCHMAP_TOKEN`. |
 
 There is no `FORBIDDEN`/403 project gating in v0.1 (single trusted token
-space, §1.1).
+space, §1.1). Local browser access guards may return 403
+`LOCAL_ACCESS_ONLY` / `LOCAL_REQUEST_REQUIRED`; these are not project permissions.
 
 ## 7. Working with `examples/*.json` (all synthetic data)
 

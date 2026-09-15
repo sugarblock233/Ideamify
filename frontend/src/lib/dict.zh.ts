@@ -3,6 +3,28 @@
  *  zh-selector E2E suite and recorded behaviour don't shift. */
 
 export const zh = {
+  // ---- Project dashboard ---------------------------------------------------
+  "dashboard.eyebrow": "科研工作空间",
+  "dashboard.title": "我的研究项目",
+  "dashboard.subtitle": "统一管理研究项目，继续记录想法、实验和结论。",
+  "dashboard.new": "+ 新建项目",
+  "dashboard.close.create": "收起创建表单",
+  "dashboard.search": "搜索项目名称或研究目标",
+  "dashboard.sort": "项目排序",
+  "dashboard.recent": "最近更新",
+  "dashboard.name": "按名称",
+  "dashboard.count": "显示 {n} / {total} 个项目",
+  "dashboard.empty.hint": "填写一个研究目标，开始你的第一张 ResearchMap。",
+  "dashboard.no.matches": "没有找到匹配的项目",
+  "dashboard.clear": "清除搜索",
+  "dashboard.enter": "进入项目：{name}",
+  "dashboard.updated": "更新于 {time}",
+  "dashboard.open.map": "打开地图",
+  "dashboard.return": "返回项目管理",
+  "dashboard.loading": "正在打开工作空间…",
+  "dashboard.retry": "重试连接",
+  "dashboard.local": "本机 · 免登录",
+
   // ---- TokenGate -----------------------------------------------------------
   "gate.subtitle": "轻量科研演化地图 · 输入访问令牌打开工作站",
   "gate.token.placeholder": "访问令牌（Bearer token）",
@@ -165,6 +187,10 @@ export const zh = {
   "modal.rel.note": "新增 supports / contradicts 不会自动改变任何节点状态；状态只能由研究者显式填写。",
 
   // ---- AiAccessModal --------------------------------------------------------------
+  "ai.local.server": "服务器：{origin}（本机免登录）",
+  "ai.local.actor": "身份：本机无令牌提交记为 researcher；可选具名令牌区分 AI 作者",
+  "ai.local.setup": "# 本机配置（无需 RESEARCHMAP_TOKEN；可选配置具名令牌）",
+  "ai.local.intro": "本机 AI 与浏览器共用相同的提交协议，无需访问令牌或模型 API Key。",
   "ai.intro": "AI 与浏览器走同一条提交协议，不需要模型 API Key；所有持令牌者属于同一个受信任空间。",
   "ai.line.server": "服务器：{origin}（Authorization: Bearer <你的令牌>）",
   "ai.line.name": "项目名称：{name}",

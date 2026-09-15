@@ -1,31 +1,41 @@
-/** Thin API client. The bearer token lives ONLY in page memory (SPEC 9):
- *  no Cookie, no localStorage, no URL, no logs. */
-
+/** Local mode needs no credentials. Remote token mode keeps the bearer only
+ *  in page memory; neither mode stores credentials in cookies or localStorage. */
 import { ApiError, type CommitResponse } from "./types";
-
 import { t } from "./i18n";
-let token: string | null = null;
 
-export function setToken(t: string | null) {
-  token = t;
+export interface ProjectLite {
+  id: string;
+  name: string;
+  objective: string;
+  revision: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
-export function hasToken(): boolean {
-  return token !== null;
+let token: string | null = null;
+export function setToken(value: string | null) { token = value; }
+export function hasToken() { return token !== null; }
+
+function checkSession(res: Response, path: string) {
+  if (res.status === 401 && path !== "/api/v1/session" && !path.startsWith("/api/v1/session?")) {
+    window.dispatchEvent(new Event("rm:unauthorized"));
+  }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
+    "x-researchmap-request": "1",
     ...(init.headers as Record<string, string> | undefined),
   };
   if (token) headers["authorization"] = `Bearer ${token}`;
   let res: Response;
   try {
-    res = await fetch(path, { ...init, headers });
+    res = await fetch(path, { ...init, headers, credentials: "same-origin" });
   } catch (e) {
     throw new ApiError(0, "NETWORK", t("api.err.network"), { detail: String(e) });
   }
+  checkSession(res, path);
   const text = await res.text();
   let body: unknown = null;
   if (text) {
@@ -52,11 +62,27 @@ const api = {
   post: <T>(path: string, data: unknown) =>
     request<T>(path, { method: "POST", body: JSON.stringify(data) }),
   health: () => fetch("/healthz").then(async (r) => (r.ok ? true : false)),
-  session: () => request<{ actor: string; app_version: string }>("/api/v1/session"),
-  projects: () =>
-    request<{ items: { id: string; name: string; objective: string; revision: number }[] }>(
-      "/api/v1/projects",
-    ),
+  session: () => request<{ actor: string; app_version: string; auth_mode: "local" | "token" }>("/api/v1/session"),
+  // The manager must include projects beyond the API's default first 50.
+  projects: async (): Promise<{ items: ProjectLite[] }> => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const items: ProjectLite[] = [];
+        let cursor: string | null = null;
+        do {
+          const page: { items: ProjectLite[]; next_cursor: string | null } = await request(
+            `/api/v1/projects?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+          );
+          items.push(...page.items);
+          cursor = page.next_cursor;
+        } while (cursor);
+        return { items };
+      } catch (e) {
+        if (attempt === 0 && e instanceof ApiError && e.code === "PAGINATION_STALE") continue;
+        throw e;
+      }
+    }
+  },
   project: (pid: string) => request<{ id: string; name: string; objective: string; revision: number } & Record<string, unknown>>(`/api/v1/projects/${pid}`),
   graph: (pid: string, opts: { includeArchived?: boolean } = {}) => {
     const p = new URLSearchParams();
@@ -109,9 +135,10 @@ const api = {
       body,
     ),
   exportBlob: async (pid: string) => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { "x-researchmap-request": "1" };
     if (token) headers["authorization"] = `Bearer ${token}`;
     const res = await fetch(`/api/v1/projects/${pid}/export`, { headers });
+    checkSession(res, "attachment-or-export");
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as {
         error?: { code?: string; message?: string; details?: Record<string, unknown> };
@@ -120,12 +147,12 @@ const api = {
     }
     return res.blob();
   },
-  /** D3: managed attachment bytes. Bearer goes in the header only — it must
-   *  never appear in an <img> URL (D 批 §9.2). */
+  /** Managed bytes follow the same local/token access guard. */
   attachmentBlob: async (aid: string) => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { "x-researchmap-request": "1" };
     if (token) headers["authorization"] = `Bearer ${token}`;
     const res = await fetch(`/api/v1/attachments/${aid}`, { headers });
+    checkSession(res, "attachment-or-export");
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as {
         error?: { code?: string; message?: string; details?: Record<string, unknown> };
@@ -137,7 +164,7 @@ const api = {
   /** D3: multipart upload → staged attachment row (route-level 10MB/pixel
    *  checks live server-side; here just a plain multipart POST). */
   uploadAttachment: async (pid: string, file: File) => {
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { "x-researchmap-request": "1" };
     if (token) headers["authorization"] = `Bearer ${token}`;
     const fd = new FormData();
     fd.append("file", file);
@@ -150,6 +177,7 @@ const api = {
     const text = await res.text();
     let body: unknown = null;
     try { body = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+    checkSession(res, "attachment-or-export");
     if (!res.ok) {
       const e = (body as { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null)?.error;
       throw new ApiError(res.status, e?.code ?? "UNKNOWN", e?.message ?? `HTTP ${res.status}`, e?.details ?? {});

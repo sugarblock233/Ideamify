@@ -7,6 +7,11 @@ its `.env` file in place. Keep using the same Compose project name: Compose
 prefixes the `researchmap-data` volume with it. A different project name can
 start an empty instance using a different volume.
 
+Default local mode requires no credentials and must retain a loopback-only
+listener. Before exposing a remote endpoint, set `RESEARCHMAP_AUTH_MODE=token`
+and configure `RESEARCHMAP_TOKENS`; a missing token config prevents startup.
+Recreate the service with `docker compose up -d --build` after changing mode.
+
 ## Check, stop and restart
 
 ```bash

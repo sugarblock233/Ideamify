@@ -12,6 +12,13 @@ from typing import Dict
 # 2 MiB hard request-body limit (SPEC 6)
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
+
+def auth_mode() -> str:
+    mode = os.environ.get("RESEARCHMAP_AUTH_MODE", "local").strip().lower()
+    if mode not in ("local", "token"):
+        raise RuntimeError("RESEARCHMAP_AUTH_MODE must be local or token")
+    return mode
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -30,6 +37,8 @@ def load_token_config() -> Dict[str, str]:
     plaintext needs to live only in this protected configuration.
     """
     raw = os.environ.get("RESEARCHMAP_TOKENS", "").strip()
+    if auth_mode() == "local" and (not raw or raw == "{}"):
+        return {}
     if not raw:
         raise RuntimeError(
             "RESEARCHMAP_TOKENS is required: set inline JSON or a path to a JSON "
@@ -61,6 +70,7 @@ def _default_storage_dir() -> str:
 
 @dataclass(frozen=True)
 class Settings:
+    auth_mode: str = field(default_factory=auth_mode)
     db_path: str = field(default_factory=_default_db_path)
     storage_dir: str = field(default_factory=_default_storage_dir)
     static_dir: str = field(

@@ -758,4 +758,4 @@ async def commit_route(pid: str, request: Request,
 
 @router.get("/session")
 def session_info(actor: str = Depends(require_auth)) -> dict:
-    return {"actor": actor, "app_version": __version__}
+    return {"actor": actor, "app_version": __version__, "auth_mode": get_settings().auth_mode}

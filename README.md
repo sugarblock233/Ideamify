@@ -53,17 +53,19 @@ cd Ideamify
 cp .env.example .env
 ```
 
-Edit `.env`: replace both token placeholders with different, long random
-values. Run `openssl rand -hex 24` twice to generate them. Keep the names
-`researcher` and `ai-one`, or choose your own; these names appear in history.
-Every token can read and write all projects in this instance.
+The default `RESEARCHMAP_AUTH_MODE=local` needs no account or token. Compose
+binds only to `127.0.0.1`; keep that binding for local mode. To serve remote
+users, explicitly select `RESEARCHMAP_AUTH_MODE=token` and configure long,
+random named tokens in `RESEARCHMAP_TOKENS` behind your protected network or
+HTTPS proxy. Named AI tokens remain optional in local mode.
 
 ```bash
 docker compose up -d --build
 ```
 
-Open **http://127.0.0.1:8000/**, enter your researcher token, and create a
-project. Choose **+ 一级路线** to add a route, then select a node and choose
+Open **http://127.0.0.1:8000/** to see **My research projects** immediately.
+Create a project, search by name/objective, or sort by latest update and open
+any project card. Use **‹ ResearchMap** in a map to return to the manager. Choose **+ 一级路线** to add a route, then select a node and choose
 **+ 子节点** to record an attempt or follow-up.
 
 Follow [your first research cycle](docs/GETTING_STARTED.md) for a complete
@@ -72,7 +74,8 @@ walkthrough, including handing the record to an AI session.
 ## Keep using it
 
 - **Save before leaving.** Node edits are saved explicitly. Reloading the page
-  asks you to log in again; the token is kept only in page memory.
+  restores the current map without login in local mode. Unsaved drafts still
+  need to be saved; returning to the manager warns before discarding them.
 - **After an AI update**, use the in-app **刷新** button or **载入更新** to bring
   in new records. Review any conflicting fields before saving your draft.
 - **Back up your data.** Restarting or rebuilding preserves the Compose

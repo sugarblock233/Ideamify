@@ -1,162 +1,69 @@
-import { useMemo, useState } from "react";
-import TokenGate, { type ProjectLite } from "./gate/TokenGate";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import TokenGate from "./gate/TokenGate";
+import ProjectDashboard from "./projects/ProjectDashboard";
 import Workspace from "./workspace/Workspace";
-import { parseDeepLink } from "./lib/deeplink";
-import api, { uuidv4, setToken } from "./lib/api";
+import { parseDeepLink, replaceDeepLink } from "./lib/deeplink";
+import api, { setToken, type ProjectLite } from "./lib/api";
 import { ApiError } from "./lib/types";
 import { useT } from "./lib/i18n";
 
-/** A01: the empty state is a working screen, not a dead end — create the
- *  first project directly in the browser (same commit path as the UI), enter
- *  an existing project, or switch token. Input is preserved on errors. */
-function EmptyProjects({
-  projects,
-  onEnter,
-  onRefresh,
-}: {
-  projects: ProjectLite[];
-  onEnter: (id: string) => void;
-  onRefresh: (list: ProjectLite[]) => void;
-}) {
-  const t = useT();
-  const [name, setName] = useState("");
-  const [objective, setObjective] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const valid = name.trim().length >= 1 && name.trim().length <= 100 && objective.trim().length >= 1;
-
-  const refresh = async () => {
-    setRefreshing(true);
-    try {
-      onRefresh((await api.projects()).items);
-    } catch {
-      /* keep current list */
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const create = async () => {
-    if (!valid || busy) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await api.createProject({
-        request_id: uuidv4(),
-        name: name.trim(),
-        objective: objective.trim(),
-      });
-      const list = await api.projects();
-      onRefresh(list.items);
-      onEnter(res.id);
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : t("empty.create.err"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="gate">
-      <div className="box">
-        <h1>ResearchMap</h1>
-        <div className="sub">
-          {projects.length ? t("empty.enter.or.create") : t("empty.none")}
-        </div>
-        {projects.map((pr) => (
-          <button
-            key={pr.id}
-            style={{ width: "100%", textAlign: "left", marginBottom: 6 }}
-            onClick={() => onEnter(pr.id)}
-          >
-            {t("empty.enter.btn", { name: pr.name, rev: pr.revision })}
-          </button>
-        ))}
-        <div style={{ borderTop: "1px solid var(--line)", margin: "12px 0" }} />
-        <label className="field">{t("empty.name.label")}</label>
-        <input
-          value={name}
-          maxLength={100}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t("empty.name.placeholder")}
-        />
-        <label className="field">{t("empty.objective.label")}</label>
-        <textarea
-          value={objective}
-          maxLength={4000}
-          onChange={(e) => setObjective(e.target.value)}
-          style={{ minHeight: 80 }}
-          placeholder={t("empty.objective.placeholder")}
-        />
-        {err && <div className="hint err" style={{ marginTop: 8 }}>{err}</div>}
-        <div className="mrow" style={{ marginTop: 12 }}>
-          <button className="primary" disabled={!valid || busy} onClick={() => void create()}>
-            {busy ? t("empty.creating") : t("empty.create")}
-          </button>
-          <button onClick={() => void refresh()} disabled={refreshing}>
-            {refreshing ? t("empty.refreshing") : t("empty.refresh")}
-          </button>
-        </div>
-        <div className="note">{t("empty.note")}</div>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
+  const t = useT();
   const deep = useMemo(() => parseDeepLink(), []);
-  // The deep-link node id is only for the URL's own project; entering a
-  // project from the list never drags a foreign/stale node id along.
   const [entryNode, setEntryNode] = useState<string | null>(deep.nodeId ?? null);
-  // "token" here only records presence; the value itself lives in lib/api memory.
-  const [authed, setAuthed] = useState(false);
+  const [projectId, setProjectId] = useState<string | null>(deep.projectId ?? null);
   const [projects, setProjects] = useState<ProjectLite[]>([]);
-  const [projectId, setProjectId] = useState<string | null>(null);
-
-  if (!authed) {
-    return (
-      <TokenGate
-        deepProjectId={deep.projectId}
-        onEnter={(list, pid) => {
-          setProjects(list);
-          setAuthed(true);
-          setProjectId(pid);
-        }}
-      />
-    );
+  const [session, setSession] = useState<Awaited<ReturnType<typeof api.session>> | null>(null);
+  const [phase, setPhase] = useState<"loading" | "gate" | "ready" | "error">("loading");
+  const [error, setError] = useState("");
+  const [reauth, setReauth] = useState(false);
+  const refresh = useCallback(async () => { setProjects((await api.projects()).items); }, []);
+  const enter = useCallback(async () => {
+    const info = await api.session();
+    await refresh();
+    setSession(info); setPhase("ready"); setReauth(false);
+  }, [refresh]);
+  const boot = useCallback(async () => {
+    setPhase("loading"); setError("");
+    try { await enter(); }
+    catch (e) {
+      if (e instanceof ApiError && e.status === 401) setPhase("gate");
+      else { setError(e instanceof Error ? e.message : t("gate.err.network")); setPhase("error"); }
+    }
+  }, [enter, t]);
+  useEffect(() => { void boot(); }, [boot]);
+  useEffect(() => {
+    const handler = () => { if (phase === "ready") setReauth(true); };
+    window.addEventListener("rm:unauthorized", handler);
+    return () => window.removeEventListener("rm:unauthorized", handler);
+  }, [phase]);
+  function navigate(id: string | null) {
+    setEntryNode(null); setProjectId(id);
+    if (id) replaceDeepLink(id);
+    else window.history.replaceState(null, "", "/");
   }
-
-  if (!projectId) {
-    return (
-      <EmptyProjects
-        projects={projects}
-        onEnter={(id) => {
-          setEntryNode(null);
-          setProjectId(id);
-        }}
-        onRefresh={setProjects}
-      />
-    );
+  function exit() {
+    setToken(null); setSession(null); setProjects([]); setReauth(false);
+    navigate(null); setPhase("gate");
   }
-
-  return (
-    <Workspace
-      key={projectId}
-      projectId={projectId}
-      projects={projects}
-      initialNodeId={entryNode ?? undefined}
-      onChangeProject={(pid) => {
-        setEntryNode(null);
-        setProjectId(pid);
-      }}
-      refreshProjectList={setProjects}
-      onExit={() => {
-        setToken(null);
-        setAuthed(false);
-        setProjectId(null);
-        setEntryNode(null);
-      }}
-    />
-  );
+  if (phase === "loading" || phase === "error") return <div className="gate"><div className="box">
+    <h1>ResearchMap</h1>
+    {phase === "loading" ? <p role="status">{t("dashboard.loading")}</p>
+      : <><p className="hint err" role="alert">{error}</p><button onClick={() => void boot()}>{t("dashboard.retry")}</button></>}
+  </div></div>;
+  if (phase === "gate") return <TokenGate onEnter={enter} />;
+  return <>
+    {/* A remote credential expiring does not unmount and discard an open draft. */}
+    <div className="app-content" inert={reauth}>
+      {projectId ? <Workspace key={projectId} projectId={projectId} projects={projects}
+        initialNodeId={entryNode ?? undefined} onChangeProject={navigate} refreshProjectList={setProjects}
+        onHome={() => { navigate(null); }} onExit={exit} localMode={session?.auth_mode === "local"} />
+        : <ProjectDashboard projects={projects} actor={session?.actor ?? "researcher"}
+          localMode={session?.auth_mode === "local"} onEnter={navigate} onRefresh={refresh}
+          onExit={exit} />}
+    </div>
+    {reauth && <div className="reauth-overlay" role="dialog" aria-modal="true" aria-label={t("gate.subtitle")}>
+      <TokenGate onEnter={enter} />
+    </div>}
+  </>;
 }

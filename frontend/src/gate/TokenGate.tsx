@@ -5,32 +5,26 @@ import { useState } from "react";
 import api, { setToken } from "../lib/api";
 import { useT } from "../lib/i18n";
 
-export interface ProjectLite {
-  id: string;
-  name: string;
-  objective: string;
-  revision: number;
-}
+export type { ProjectLite } from "../lib/api";
 
 interface Props {
-  deepProjectId?: string;
-  onEnter: (projects: ProjectLite[], projectId: string | null, error?: string) => void;
+  onEnter: () => Promise<void>;
 }
 
-export default function TokenGate({ deepProjectId, onEnter }: Props) {
+export default function TokenGate({ onEnter }: Props) {
   const t = useT();
   const [token, setTokenInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   async function enter() {
-    if (!token.trim()) return;
+    if (!token.trim() || busy) return;
     setBusy(true);
     setErr("");
     try {
       setToken(token.trim());
-      const list = await api.projects();
-      onEnter(list.items, deepProjectId ?? list.items[0]?.id ?? null);
+      await api.session();
+      await onEnter();
     } catch (e) {
       setToken(null);
       // Server-provided error messages pass through untranslated (DECISIONS §16);
