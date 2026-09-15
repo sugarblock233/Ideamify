@@ -60,12 +60,33 @@ migration steps will be noted here.
   filtered version. The new 泳道 layout renders versions × top-level routes
   as a deterministic progress grid — columns per version plus 未分配, one
   row per route, tree edges hidden and folds intentionally ignored.
+  A shared node belonging to several matching versions shows one card per
+  hit lane instead of collapsing into the first one.
+- **Version manager in the UI**: create, rename, reorder (up/down via the
+  commit-protocol `version.update after_id` repositioning) and archive
+  research versions without touching the API or CLI — entry points in the
+  view menu「科研版本管理」 and always visible next to the version filter
+  row, even on projects that have no versions yet. Archived versions stay
+  filterable; unarchiving is not provided server-side and the dialog says
+  so.
+- A fixed **route rail on the overview tier**: when the whole map is fitted
+  and route labels fall off-screen, a collapsible screen-space list of every
+  visible top-level route stays clickable to zoom straight to it.
+- Cards **preview unsaved edits live**: while an existing node is being
+  edited, its map card mirrors the draft title, summary and status
+  immediately, without re-laying-out the graph; text-only edits never move
+  other cards.
+- Draft cards find a deterministic spot even on an **empty canvas, empty
+  filter result or swimlane grid** (docked under the 未分配 column), so
+  creation never depends on an existing card to anchor to.
 
 ### Changed
 
 - Save records are now consistently labelled 「记录 #N」 (was mixed wording
   around revision numbers) to keep them clearly distinct from research
-  version labels.
+  version labels. The root card, the recent-changes list and the project
+  record indicator all follow this wording; the application's own version
+  is labelled separately as 「应用版本 vN」.
 
 - The node-create modal is retired in favour of the on-map draft card;
   the side panel keeps the same form, accessible names and A06 evidence
@@ -80,6 +101,13 @@ migration steps will be noted here.
 
 - Node details now use the correct status color; supported results no longer
   appear red.
+- Acceptance rework: a pasted/uploaded image no longer clobbers text typed
+  while the upload was in flight; `backup`/`restore` fail honestly when the
+  attachment bundle is incomplete instead of restoring silently partial data;
+  replaying the exact bytes of a successful commit is idempotent at the
+  request level again; on the swimlane, a shared node appears once per
+  matched version column; toolbar, card and context-menu fold/branch controls
+  disappear on the swimlane grid where they would be dead buttons.
 
 ### Improved
 

@@ -312,7 +312,7 @@ v0.1 的使用者是**一个研究者和其信任的若干 AI 工具**。可以�
 | `relation.archive` | `id`、`reason` |
 | `relation.restore` | `id`、`reason`；两端必须未归档 |
 | `version.create` | `id`、`name`（1–80，非空白）、可选 description（≤500）、可选 after_id（与节点一致的省略=追加/ null=最前/ UUID=其后） |
-| `version.update` | `id`、`fields` 只允许 name、description |
+| `version.update` | `id`、`fields`：name、description，及可选 after_id 顺位调整（省略=不动 / null=置顶 / UUID=移到其后；归档版本拒绝整个 update） |
 | `version.archive` | `id`、`reason`；已挂该版本的节点保留归属，但节点不能再引用已归档版本（update 校验拒绝） |
 
 创建和移动时，after_id 缺省表示追加到同级最后；显式 null 表示最前；UUID 表示放到该有效同级节点之后。不能指定自己。服务器负责生成/重排 order_index。
