@@ -44,6 +44,16 @@ import { useT } from "../lib/i18n";
 export const nodeTypes = { card: NodeCard, root: RootCard, draft: DraftCard };
 const edgeTypes = { relation: RelationEdge };
 
+/** F04: a node on ≥2 known research versions is a shared node — the badge
+ *  names its lanes on every one of its display instances. Unknown version refs
+ *  don't count (they have no column to share). */
+function laneVersionNames(n: GraphNode, vers: Map<string, string>): string | undefined {
+  const names = (n.version_ids ?? [])
+    .map((v) => vers.get(v))
+    .filter((x): x is string => !!x);
+  return names.length > 1 ? names.join(" · ") : undefined;
+}
+
 /** A03/R03: the zoom at which a 280px card's body text is actually readable.
  *  First open and search-locate both land here, so "readable" means one thing
  *  in this app rather than being re-derived per entry point. */
@@ -90,6 +100,9 @@ export interface CanvasProps {
   /** E5: research versions in display order — the swimlane columns; unused
    *  by the tree modes. */
   versions: ResearchVersion[];
+  /** F04: the active version filter (VersionFilter). Swimlanes use it to pin
+   *  a filtered shared node to the filtered version's column. */
+  versionId: string | null;
   /** C3: the open node-create draft session (null when none). Canvas renders
    *  it as a dashed overlay card docked next to its parent plus a dashed temp
    *  edge; the card and the side panel edit the same session. */
@@ -147,9 +160,9 @@ function Inner(p: CanvasProps) {
   const layout: LayoutResult = useMemo(
     () =>
       p.mode === "swimlane"
-        ? computeSwimlane(p.projectId, p.graph, p.versions, t("ver.unassigned"))
+        ? computeSwimlane(p.projectId, p.graph, p.versions, t("ver.unassigned"), { activeVersion: p.versionId })
         : computeLayout(p.projectId, p.graph, p.folds, p.branchRoot, treeMode),
-    [p.projectId, p.graph, p.folds, p.branchRoot, treeMode, p.mode, p.versions, t],
+    [p.projectId, p.graph, p.folds, p.branchRoot, treeMode, p.mode, p.versions, p.versionId, t],
   );
   // structKey must change for ANY structural change — including same-count
   // re-parenting / sibling reordering — so positions (not just their count)
@@ -213,10 +226,14 @@ function Inner(p: CanvasProps) {
         } as RootData,
       });
     }
+    const vers = new Map(p.versions.map((v) => [v.id, v.name]));
     for (const n of p.graph) {
       const pos = layout.positions.get(n.id);
       if (!pos) continue;
       const mark = p.marks.newIds.has(n.id) ? "new" : p.marks.changedIds.has(n.id) ? "changed" : undefined;
+      // F04: sharedness is business data, not per-instance — a node on >1
+      // known version shows the shared badge on every one of its cards.
+      const sharedLabel = laneVersionNames(n, vers);
       out.push({
         id: n.id,
         type: "card",
@@ -231,6 +248,7 @@ function Inner(p: CanvasProps) {
           hiddenCount: pos.hiddenCount,
           hasChildren: n.child_count > 0 || pos.hiddenCount > 0,
           mark,
+          shared: sharedLabel,
           badgeCount: p.marks.badges.get(n.id),
           unsaved: n.id === p.unsavedId,
           tier,
@@ -240,6 +258,42 @@ function Inner(p: CanvasProps) {
           onContextMenu: onCtx,
         } as CardData,
       });
+    }
+    // F04: swimlane display instances — mirrored cards of a multi-version
+    // node in its other lanes. Same CardData with the business node, so every
+    // click/select/locate resolves to the one real node.
+    if (p.mode === "swimlane") {
+      for (const [iid, pos] of layout.positions) {
+        if (!pos.sharedOf) continue;
+        const n = p.graph.find((g) => g.id === pos.sharedOf);
+        if (!n) continue;
+        const mark = p.marks.newIds.has(n.id) ? "new" : p.marks.changedIds.has(n.id) ? "changed" : undefined;
+        out.push({
+          id: iid,
+          type: "card",
+          position: { x: pos.x, y: pos.y },
+          width: pos.width,
+          height: pos.height,
+          draggable: false,
+          connectable: false,
+          data: {
+            node: n,
+            folded: false,
+            hiddenCount: 0,
+            hasChildren: n.child_count > 0,
+            mark,
+            shared: laneVersionNames(n, vers),
+            badgeCount: p.marks.badges.get(n.id),
+            unsaved: n.id === p.unsavedId,
+            tier,
+            low: p.lowInterference,
+            v: treeMode === "v",
+            onToggleFold,
+            onContextMenu: onCtx,
+          } as CardData,
+          className: "rm-swim-instance",
+        } as Node);
+      }
     }
     // C3: the unsaved draft card. Not part of the tree layout — docked next to
     // its parent (or its parent's nearest visible ancestor when folded away),
@@ -546,7 +600,10 @@ function Inner(p: CanvasProps) {
       // C3: the draft card is not a node — selecting it would 404 the node
       // endpoint; its edit surface is the card itself (and the side panel).
       if (node.type === "draft") return;
-      p.onSelect(node.id);
+      // F04: swimlane display instances resolve to their business node —
+      // details/selection/edit all address the same node from every instance.
+      const biz = (node.data as { node?: { id?: string } }).node?.id;
+      p.onSelect(biz ?? node.id);
     },
     [p.onSelect],
   );

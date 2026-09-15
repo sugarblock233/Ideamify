@@ -394,6 +394,7 @@ export const zh = {
 
   // ---- NodeCard --------------------------------------------------------------------------------------
   "node.archived": "已归档",
+  "node.shared.among": "共享节点：同时属于多个科研版本（{lanes}）",
   "node.no.summary": "（无摘要）",
   "node.children.count": "子 {n}",
   "node.relations.count": "关联 {n}",

@@ -55,6 +55,10 @@ export interface PlacedNode {
   /** number of hidden (folded or branch-filtered) direct children */
   hiddenCount: number;
   depth: number;
+  /** F04: set only on swimlane display instances — the business node whose
+   *  card this instance mirrors (the instance's own canvas id is
+   *  `${sharedOf}${SWIM_INSTANCE_SEP}${versionKey}`). */
+  sharedOf?: string;
 }
 
 export interface LayoutResult {
@@ -254,19 +258,27 @@ export interface SwimlaneGrid {
 
 /** E5: version × route swimlane layout. Rows are top-level routes (parent_id
  *  null) sorted (order_index, id); columns are research versions sorted
- *  (order_index, id) plus the 「未分配」 pseudo-column at the end. Every node
- *  lands in its route's row and its FIRST known assigned version's column
- *  (multi-version sharing displays the first lane today — DECISIONS §19);
- *  nodes within a cell stack deterministically by (order_index, id) in
+ *  (order_index, id) plus the 「未分配」 pseudo-column at the end.
+ *  F04: a node assigned to several versions gets a DISPLAY INSTANCE per
+ *  matched column — the canvas id of the extra instances is
+ *  `${nodeId}${SWIM_INSTANCE_SEP}${versionKey}` while the first instance keeps
+ *  the plain business id, so selection, details, counts-pinning and edits keep
+ *  pointing at the same node. Under an active version filter the population is
+ *  matched ∪ ancestors, and a node carrying the filtered version is shown in
+ *  that version's column only (never back in its other lanes); nodes not
+ *  carrying the filter (context anchors) keep the first-known-column rule.
+ *  Nodes within a cell stack deterministically by (order_index, id) in
  *  SWIM_CELL_STEP steps. Tree edges are not drawn in this mode (plan E5);
  *  fold/branch state is deliberately ignored — the swimlane is the whole
  *  filtered population on one grid. Same (nodes, versions, order) ⇒ same
  *  coordinates. */
+export const SWIM_INSTANCE_SEP = "@@swim@@";
 export function computeSwimlane(
   projectId: string,
   nodes: GraphNode[],
   versions: ResearchVersion[],
   unassignedLabel: string,
+  opts?: { activeVersion?: string | null },
 ): LayoutResult {
   const rootId = rootIdOf(projectId);
   const empty: LayoutResult = { positions: new Map(), rootId, visibleIds: new Set() };
@@ -309,27 +321,45 @@ export function computeSwimlane(
   );
   const slots = new Map<string, number>(); // `${rowIdx}:${colIdx}` → next card no
 
-  const placed: { id: string; rIdx: number; cIdx: number; s: number }[] = [];
+  const placed: { id: string; rIdx: number; cIdx: number; s: number; sharedOf?: string }[] = [];
   const stack = new Map<number, number>(); // rowIdx → max cards in the row
   for (const n of ordered) {
     const r = routeOf(n);
     const rIdx = rowIndex.get(r.id);
     if (rIdx === undefined) continue;
     const vids = n.version_ids ?? [];
-    let cIdx = -1;
-    for (const v of vids) {
-      const hit = colIndex.get(v);
-      if (hit !== undefined) {
-        cIdx = hit;
-        break;
-      }
+    const matched = vids
+      .map((v) => colIndex.get(v))
+      .filter((c): c is number => c !== undefined);
+    // F04: which columns should show this node?
+    //  - active single-version filter: exactly that column for nodes carrying
+    //    it (the report's must-have: a v1+v2 node filtered to v2 sits in the
+    //    v2 lane, not back in v1); context nodes (surviving ancestors that
+    //    don't carry the filter) keep the first-known-column rule.
+    //  - otherwise: one display instance per matched column; none → 未分配.
+    let cols: number[];
+    if (opts?.activeVersion && opts.activeVersion !== VERSION_FILTER_UNASSIGNED) {
+      const av = colIndex.get(opts.activeVersion);
+      cols = av !== undefined && matched.includes(av) ? [av] : matched.slice(0, 1);
+    } else {
+      cols = matched.length > 0 ? [...matched].sort((a, b) => a - b) : [];
     }
-    if (cIdx < 0) cIdx = colIndex.get(VERSION_FILTER_UNASSIGNED)!;
-    const cellKey = `${rIdx}:${cIdx}`;
-    const s = slots.get(cellKey) ?? 0;
-    slots.set(cellKey, s + 1);
-    placed.push({ id: n.id, rIdx, cIdx, s });
-    stack.set(rIdx, Math.max(stack.get(rIdx) ?? 0, s + 1));
+    if (cols.length === 0) cols = [colIndex.get(VERSION_FILTER_UNASSIGNED)!];
+    cols.forEach((cIdx, k) => {
+      const cellKey = `${rIdx}:${cIdx}`;
+      const s = slots.get(cellKey) ?? 0;
+      slots.set(cellKey, s + 1);
+      placed.push({
+        // the first instance keeps the business id (selection/locate/unsaved
+        // all resolve through it); extra instances get derivative ids
+        id: k === 0 ? n.id : `${n.id}${SWIM_INSTANCE_SEP}${cols![k] === colIndex.get(VERSION_FILTER_UNASSIGNED) ? "u" : vids.find((v) => colIndex.get(v) === cols![k])}`,
+        rIdx,
+        cIdx,
+        s,
+        sharedOf: k === 0 ? undefined : n.id,
+      });
+      stack.set(rIdx, Math.max(stack.get(rIdx) ?? 0, s + 1));
+    });
   }
 
   const positions = new Map<string, PlacedNode>();
@@ -348,7 +378,8 @@ export function computeSwimlane(
       width: CARD_W,
       height: CARD_H,
       hiddenCount: 0,
-      depth: (byId.get(p.id)?.parent_id ?? null) === null ? 1 : 2,
+      depth: (byId.get(p.sharedOf ?? p.id)?.parent_id ?? null) === null ? 1 : 2,
+      ...(p.sharedOf ? { sharedOf: p.sharedOf } : {}),
     });
     visibleIds.add(p.id);
   }

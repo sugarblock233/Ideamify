@@ -28,6 +28,9 @@ export interface CardData extends Record<string, unknown> {
    *  未保存 flag on the card itself, so the live-edit state is visible on the
    *  map and not only in the panel. */
   unsaved?: boolean;
+  /** F04: swimlane shared-set badge — " v1 · v2" on a node assigned to more
+   *  than one research version; every display instance shows it. */
+  shared?: string;
   badgeCount?: number;
   tier?: DetailTier;
   low?: boolean;
@@ -71,6 +74,11 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
           {statusLabel(n.status)}
         </span>
         {n.archived && <span className="arch-pill">{t("node.archived")}</span>}
+        {d.shared && (
+          <span className="shared-pill" data-testid="shared-badge" title={t("node.shared.among", { lanes: d.shared })}>
+            {d.shared}
+          </span>
+        )}
       </div>
       <div className="title" title={n.title}>{n.title}</div>
       <div className="summary" title={n.summary}>{n.summary || t("node.no.summary")}</div>

@@ -171,3 +171,56 @@ test("泳道：列头三枚（第一轮/第二轮/未分配）+ 行头 + 卡片�
   await expect(card(page, "版本B")).toBeVisible();
   await expect(card(page, "版本C")).toBeVisible();
 });
+
+test("F04: 共享节点每条命中泳道各一个显示实例；筛选 v2 落 v2 列", async ({ page }) => {
+  const f = await seedVersions(page);
+  const d = crypto.randomUUID();
+  const rev = (await api(page, "GET", `/api/v1/projects/${f.pid}`)).json.revision as number;
+  const res = await api(page, "POST", `/api/v1/projects/${f.pid}/commits`, {
+    request_id: crypto.randomUUID(),
+    expected_revision: rev,
+    client_label: "seed-shared",
+    summary: "双归属共享节点",
+    operations: [
+      { op: "node.create", id: d, parent_id: f.r, kind: "idea",
+        title: "共享发现：同时属于 v1 和 v2", summary: "两地都在", status: "in_progress",
+        version_ids: [f.va, f.vb] },
+    ],
+  });
+  expect(res.status, JSON.stringify(res.json)).toBe(200);
+  await enterStudio(page, f.pid);
+  await expect(card(page, "共享发现")).toBeVisible({ timeout: 20_000 });
+
+  await openMenu(page);
+  await page.getByTestId("vt-layout-swimlane").click();
+  await closeMenu(page);
+
+  // 全部版本视图：v1、v2 两列各一个实例，两卡都带共享徽标
+  const cards = card(page, "共享发现");
+  await expect(cards).toHaveCount(2);
+  await expect(cards.first().getByTestId("shared-badge")).toHaveText("第一轮 · 第二轮");
+  await expect(cards.nth(1).getByTestId("shared-badge")).toHaveText("第一轮 · 第二轮");
+  // 两实例横向对齐各自列：xs 不同且分属 v1/v2 两列头之下
+  const boxA = await cards.first().boundingBox();
+  const boxB = await cards.nth(1).boundingBox();
+  expect(Math.abs(boxA!.x - boxB!.x)).toBeGreaterThan(150);
+
+  // 点击第二实例：详情指向同一业务节点（实例 id ≠ 业务 id，但选择被解析回业务 id）
+  await cards.nth(1).click();
+  await expect(page.locator(".side").getByRole("heading", { name: /共享发现/ })).toBeVisible();
+  await expect(page.locator(".hint.err")).toHaveCount(0); // 实例 id 若未解析会 404
+
+  // 单版本筛 v2：共享节点落入 v2 列（不再回到 v1 首列），且只有这一个实例
+  await openMenu(page);
+  await page.getByTestId(`vt-version-${f.vb.slice(0, 8)}`).click();
+  await closeMenu(page);
+  const filtered = card(page, "共享发现");
+  await expect(filtered).toHaveCount(1);
+  const col = page.getByTestId("swimlane-headers").locator(".swim-col", { hasText: "第二轮" });
+  await expect(col).toBeVisible();
+  const colBox = await col.boundingBox();
+  const dBox = await filtered.boundingBox();
+  expect(Math.abs(dBox!.x - colBox!.x)).toBeLessThan(80); // 与列头同 x 起点
+  const bBox = await card(page, "版本B").boundingBox();
+  expect(Math.abs(dBox!.x - bBox!.x)).toBeLessThan(10); // 与 v2 独占节点同列
+});

@@ -9,6 +9,7 @@ import {
   computeSwimlane,
   rootIdOf,
   SWIM_CELL_STEP,
+  SWIM_INSTANCE_SEP,
 } from "../layout";
 import { VERSION_FILTER_UNASSIGNED } from "../versionFilter";
 import type { GraphNode, ResearchVersion } from "../types";
@@ -133,6 +134,71 @@ describe("computeSwimlane", () => {
     const list = [...draw(fixture(), VERSIONS).positions.values()];
     expect(list.length).toBeGreaterThan(0);
     for (const a of list) for (const b of list) if (a !== b) expect(cardsOverlap(a, b)).toBe(false);
+  });
+
+  /* ---- F04: multi-version shared nodes get a display instance per lane ---- */
+
+  function drawO(ns: GraphNode[], opts?: { activeVersion?: string | null }) {
+    return computeSwimlane(PID, ns, VERSIONS, "未分配", opts);
+  }
+
+  it("shows a shared node once per matched column; the first instance keeps the business id", () => {
+    const ns = [
+      node("r1", null, [], 0),
+      node("s1", "r1", ["v2", "v1"], 1), // shared v1+v2
+      node("only1", "r1", ["v1"], 2),
+    ];
+    const r = draw(ns);
+    const colX = new Map(r.swimlane!.cols.map((c) => [c.key, c.x]));
+    // primary instance = business id, leftmost matched column (v1)
+    expect(r.positions.get("s1")!.x).toBe(colX.get("v1"));
+    // second display instance lands in v2, id derived, marked with sharedOf
+    const extraId = `s1${SWIM_INSTANCE_SEP}v2`;
+    expect(r.positions.has(extraId)).toBe(true);
+    expect(r.positions.get(extraId)!.x).toBe(colX.get("v2"));
+    expect(r.positions.get(extraId)!.sharedOf).toBe("s1");
+    expect(r.positions.get("s1")!.sharedOf).toBeUndefined();
+    // single-assignment nodes are not mirrored
+    expect(r.positions.size).toBe(4);
+    expect(r.visibleIds.has(extraId)).toBe(true);
+  });
+
+  it("under a single-version filter puts the filtered shared node in the filtered column only", () => {
+    const ns = [
+      node("r1", null, [], 0),
+      node("s1", "r1", ["v1", "v2"], 1),
+      node("ctx", "r1", ["v1"], 2), // context ancestor not carrying the filter
+    ];
+    const r = drawO(ns, { activeVersion: "v2" });
+    const colX = new Map(r.swimlane!.cols.map((c) => [c.key, c.x]));
+    expect(r.positions.get("s1")!.x).toBe(colX.get("v2"));
+    expect([...r.positions.keys()].filter((k) => k.startsWith(`s1${SWIM_INSTANCE_SEP}`))).toEqual([]);
+    // context keeps the first-known-column rule
+    expect(r.positions.get("ctx")!.x).toBe(colX.get("v1"));
+  });
+
+  it("no filter: instances do not collide and stay deterministic", () => {
+    const ns = [
+      node("r1", null, [], 0),
+      node("s1", "r1", ["v2", "v1"], 1),
+    ];
+    const a = draw(ns);
+    const b = draw([...ns]);
+    expect(JSON.stringify([...a.positions])).toBe(JSON.stringify([...b.positions]));
+    const list = [...a.positions.values()];
+    for (const x of list) for (const y of list) if (x !== y) expect(cardsOverlap(x, y)).toBe(false);
+  });
+
+  it("business-id counting stays deduplicated: every graph node still has a primary instance", () => {
+    const ns = [
+      node("r1", null, [], 0),
+      node("s1", "r1", ["v1", "v2"], 1),
+      node("s2", "r1", ["v1", "v2"], 2),
+    ];
+    const r = draw(ns);
+    for (const n of ns) expect(r.positions.has(n.id)).toBe(true);
+    // 3 nodes + 4 extra (2 shared × 2nd lane each... s1,s2 both have 2 lanes → 1 extra each)
+    expect(r.positions.size).toBe(ns.length + 2);
   });
 });
 

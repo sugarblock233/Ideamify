@@ -396,6 +396,7 @@ export const en: Record<keyof typeof zh, string> = {
 
   // ---- NodeCard ------------------------------------------------------------------------------------
   "node.archived": "Archived",
+  "node.shared.among": "Shared node: member of several research versions ({lanes})",
   "node.no.summary": "(no summary)",
   "node.children.count": "sub {n}",
   "node.relations.count": "rel {n}",
