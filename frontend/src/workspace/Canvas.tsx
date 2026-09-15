@@ -22,6 +22,8 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useStoreApi,
+  useUpdateNodeInternals,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -499,6 +501,35 @@ function Inner(p: CanvasProps) {
     positionsRef.current = newPos;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [structKey]);
+
+  // ---- node measurement self-heal -------------------------------------------
+  // Nodes carry explicit width/height (R03, minimap fix), so for xyflow the
+  // ONLY source of handle bounds is the shared ResizeObserver's initial
+  // callback. If that callback fires while the pane still has zero size (a
+  // slow or loaded runner, pane hidden at startup) the measurement is dropped
+  // — and because fixed card sizes never change the box afterwards, it is
+  // never retried: the canvas then shows cards and a minimap but NOT A SINGLE
+  // edge (getEdgePosition needs handleBounds; seen as a CI e2e flake).
+  // Sweep the store for visible, never-measured nodes and force one
+  // measurement pass; bounded retries cover a pane that is still zero-sized
+  // when a sweep fires. A fully-measured sweep is a no-op.
+  const updateNodeInternals = useUpdateNodeInternals();
+  const store = useStoreApi();
+  useEffect(() => {
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const sweep = () => {
+      const missing: string[] = [];
+      for (const [id, n] of store.getState().nodeLookup) {
+        if (!n.hidden && !n.internals.handleBounds) missing.push(id);
+      }
+      if (missing.length === 0) return;
+      updateNodeInternals(missing);
+      if (++attempts < 10) timer = setTimeout(sweep, 200);
+    };
+    sweep();
+    return () => clearTimeout(timer);
+  }, [store, updateNodeInternals, layout]);
 
   // ---- locate (user navigation) --------------------------------------------
   useEffect(() => {
