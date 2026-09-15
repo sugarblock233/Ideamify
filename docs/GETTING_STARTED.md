@@ -1,10 +1,11 @@
-# Your first research cycle
+# Build your first research route map
 
 [简体中文](GETTING_STARTED.zh-CN.md) · [Documentation](README.md)
 
 Start the app using the [README](../README.md). The interface labels below
 match the current Chinese UI. This walkthrough uses a **synthetic example**;
 replace its content with your own question when you start a real project.
+The [research authoring guide](RESEARCH_AUTHORING.md) explains the content method in full. All operations on this page use current features.
 
 ## 1. Create a project around a question
 
@@ -17,11 +18,24 @@ and research objective, then choose **创建项目**. For example:
 A project is the long-lived record of that question. You do not need a new
 project for each experiment or AI session.
 
-## 2. Add a route and an attempt
+## 2. Establish routes, then divide them into questions
 
-Choose **+ 一级路线**, use the type **问题** or **想法**, and write a short
-summary of the direction you want to explore. Select the saved node and use
-**+ 子节点** to add an **尝试**. This is also available from the card's right-click menu.
+Separate routes by research question: for example, improve query expression,
+improve result selection, and examine the evaluation set. Choose **+ 一级路线**,
+use **问题** or **想法**, and explain the purpose and basis in the title, summary
+and rationale. You do not need to cover every possible direction at once.
+
+Under query expression, use **+ 子节点** for “Which misses come from terminology
+differences?”, then an idea such as “Can controlled synonym expansion recover
+evidence?” Add “Compare original queries with controlled expansion on a fixed
+set” as an attempt when there is a comparison design or actual exploration.
+The card's right-click menu also creates children.
+
+Explain why each step follows from earlier work. Continue deeper when useful,
+without forcing equal depth across routes. Put scripts, configurations and
+repeated runs in the relevant node's body and evidence. Code without execution
+evidence means “implemented, execution unconfirmed, effectiveness unknown”; do
+not fill in nonexistent results.
 
 Use **进行中** for work in progress. After the attempt, choose **编辑** and
 record the result. Keep these separate:
@@ -76,12 +90,18 @@ URL text. Cancelling a draft after uploading leaves no referenced record;
 unreferenced uploads are cleaned up after 30 days, while saved references
 never get deleted.
 
-## 5. Continue without erasing what you learned
+## 5. Preserve negative results and explain the next step
 
-Keep the original negative result. Create a child node for the revised idea:
-“Expand keywords only for low-recall questions.” Different attempts can have
-different conditions and outcomes; do not turn the original result green
-merely because a later variation worked.
+Keep the original negative result. Explain the question it raises, such as
+“When should expansion be triggered?”, before proposing “Expand keywords only
+for low-recall questions.” The new question may belong under the attempt or a
+more suitable broader question. Explain the transition in rationale and, when
+appropriate, add a motivates relation from the old result to the new question.
+
+Different attempts can have different conditions and outcomes; do not turn the
+original result green because a later variation worked. If a finding changes
+the route's judgment, update its summary and decision so someone reading only
+the top level understands it. Child statuses do not propagate to the route.
 
 The **关联** tab links work across branches. The **历史** tab shows the selected
 node's commits and before/after changes. Search finds earlier work by title,
@@ -106,6 +126,12 @@ browser; they are never part of the research record):
 - **Language**: 中文 / English from the top-bar ⋯ menu; content and API
   fields are never translated.
 
+For deeper reading in the current app, focus one branch, use the horizontal
+tree or outline, and progressively expand and open details. The 1–3 level
+shortcuts do not limit the data to three levels. Avoid repeatedly fitting a
+large graph to read its text. The proposed research overview and route reader
+are still [design work](RESEARCH_MAP_REDESIGN.zh-CN.md).
+
 ## 7. Versions and swimlanes
 
 When the work reaches a second or third round, tag the plan with
@@ -129,17 +155,23 @@ stages; the two never mix.
 ## 8. Hand the record to your AI
 
 Use **⋯ → AI 接入说明** to get the server address, project ID and command examples.
-Configure the AI's separate token in its terminal environment, then give it
-this instruction (fill in your project ID and the actual next task):
+In token mode, configure a named token in the AI's terminal environment.
+Local mode can omit it, or use a named token for attribution. Give the AI this
+instruction, filling in the project ID and actual next task:
 
-> Read docs/AI_USAGE.md in this checkout. Work on project PROJECT_ID using
-> the configured RESEARCHMAP_BASE_URL and RESEARCHMAP_TOKEN. Read its context,
-> then the relevant full nodes and evidence, including negative results.
-> First summarize where the research stands. For the agreed next task, write
-> only what actually changed, dry-run the commit, commit it, and read it back.
-> Keep prior findings and distinguish proposals from completed experiments.
-> If the revision changed, read the new content and resolve the conflict.
-> Never print the token or put it in the research record.
+> Read docs/RESEARCH_AUTHORING.md and docs/AI_USAGE.md. Continue PROJECT_ID
+> using the configured connection. Read the objective, routes and focus, then
+> use node for motivation, judgments and evidence, including negative results.
+> Explain the main routes before focusing on this subquestion; do not build a
+> catalogue of scripts and run IDs.
+> For the agreed task, write understandable titles and summaries explaining
+> research meaning, motivation and next steps. Distinguish proposals, code,
+> execution and evidence-backed results; missing evidence remains unknown.
+> This task does not automatically authorize experiments.
+> Preserve IDs, findings and human notes. Add justified relations and update
+> affected route summaries when needed. Dry-run, commit and read back; re-read
+> and merge on conflicts. Hand off new understanding, its effect on the route
+> and the next question. Never print or record the token.
 
 The app supplies a record, not an AI connection. Your external tool needs to
 be able to run the [CLI](../tools/researchmap.py) with Python 3 and reach the

@@ -41,7 +41,9 @@ docker compose up -d --build
 
 打开 **http://127.0.0.1:8000/**，直接进入「我的研究项目」。可以新建项目，按名称或研究目标搜索，按最近更新/名称排序，点击卡片进入地图。地图左上角 **‹ ResearchMap** 返回项目管理。点击 **+ 一级路线** 添加研究路线，再选中节点，通过 **+ 子节点** 记录尝试或后续想法。
 
-接下来按[第一轮科研记录](docs/GETTING_STARTED.zh-CN.md)走一遍，包括如何把记录交给 AI 接续。
+接下来按[建立第一张研究路线图](docs/GETTING_STARTED.zh-CN.md)走一遍，包括如何把研究交给 AI 接续。
+
+让 AI 整理内容时，先交给它[研究内容编写指南](docs/RESEARCH_AUTHORING.zh-CN.md)：先确定大路线，再拆子问题，说明每一步的研究意义与依据。代码、实际执行和研究结论需要分别核对，顶层摘要应让未亲自跑实验的人也能读懂。这套写法现在即可使用。
 
 ## 日常使用
 
@@ -54,6 +56,7 @@ v0.1 已进入个人使用和反馈阶段。已发布的 `v0.1.0` 标签是早�
 ## 项目资源
 
 - [文档目录](docs/README.md)：使用指南、AI 协议和技术设计
+- [科研版图改造交付书](docs/RESEARCH_MAP_REDESIGN.zh-CN.md)：待实施的总览、路线阅读、证据分层与验收设计；不是当前功能说明
 - [参与贡献](CONTRIBUTING.md)：开发环境、检查和 Pull Request 约定
 - 用中文或英文[报告问题](https://github.com/sugarblock233/Ideamify/issues/new?template=bug_report.yml)、[提问交流](https://github.com/sugarblock233/Ideamify/discussions)
 - [安全说明](SECURITY.md) · [行为准则](CODE_OF_CONDUCT.md) · [MIT 许可证](LICENSE)

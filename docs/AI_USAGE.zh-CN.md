@@ -12,6 +12,18 @@ Web 界面相同的提交端点上，冲突规则完全一致。本仓库所有�
 
 ---
 
+## 0. 先组织研究内容，再使用写入协议
+
+先读 [研究内容编写指南](RESEARCH_AUTHORING.zh-CN.md)。它适用于当前版本，明确如何先建立大路线，再拆分子问题并沿研究依据逐步深入；本文负责 HTTP/CLI 合同。
+
+开始时先读项目目标和全局路线，再聚焦当前问题。标题和摘要应让未亲自跑实验的人也能理解；说明前因、观察和下一步，代码细节放正文与证据。只有脚本时明确“已实现、未确认执行”，不能推导实验结果。
+
+首次建图先形成路线草案；接续时沿用合理结构。每次有新认识，检查它是否影响相关路线综述，在授权范围内同步必要的 summary/decision。主树表示归属，研究承接来自实际内容及有 reason 的关系，节点状态不向祖先自动传播。
+
+当前 `context` 不包含 rationale、details_md 和完整证据；用 `node` 补读焦点、路线和关键来源。提交前显式记录已读内容的 revision，dry-run 后提交，再读回。最后用“当前路线—新增认识—路线影响—下一步”交接。
+
+下一轮界面和上下文增量见 [改造交付书](RESEARCH_MAP_REDESIGN.zh-CN.md)，其中新功能尚未实施，不属于当前 API 合同。
+
 ## 1. 前置
 
 ### 1.1 环境变量（唯一的凭证通道）
@@ -91,10 +103,9 @@ rmcli session     # 你的身份：{"actor": "<令牌名>", "app_version": "…"
 `context` 是唯一"替你读"的端点。它按**字符预算**（`--max-chars`，
 4000–50000，默认 12000；服务器按响应的紧凑 JSON 计 Unicode 字符，不承诺
 精确 token 数）以固定优先级装内容：项目目标与焦点/祖先骨架（id+标题，
-一定完整）→ 焦点节点字段 → 直接关联（反证 `contradicts`／依赖
+一定完整）→ 关键词命中（提供 `--q` 时）→ 焦点节点字段 → 直接关联（反证 `contradicts`／依赖
 `depends_on` 优先）→ 同分支先前的 `not_supported`/`inconclusive` 记录 →
-待探索子节点 →（无 focus 时）一级路线、待探索节点、近期发现 → 关键词命中
-（`--q`）→ 近期提交。
+待探索子节点 →（无 focus 时）一级路线、待探索节点、近期发现 → 近期提交。
 
 **先分组读，再定点核**：提交前记下 `project_revision`（你的
 `expected_revision` 基线）与你将要触碰的每一个节点的确切 id。
@@ -106,14 +117,13 @@ rmcli session     # 你的身份：{"actor": "<令牌名>", "app_version": "…"
 
 | 位置 | 上限 |
 |---|---|
-| 焦点节点 `scope` / `summary` / `finding` / `decision` | 各 ≤ 500 字符；若预算放不下这些档，字段整体**省略**（不留下半句话） |
-| 焦点节点 `tags`（拼接后） | ≤ 120 字符 |
+| 焦点节点 `scope` / `summary` / `finding` / `decision` / `tags`（拼接后） | 上限 500 字符；预算不足时依次尝试 300/160/60，仍放不下则整体**省略**；缩短时带截断标记 |
 | `related_nodes` 里的关系 `reason` | ≤ 240 字符 |
 | 分组条目的 `scope` | ≤ 160 字符（"full" 条目 ≤ 300：`related_nodes`、`prior_attempts`、`matched`，以及红/绿状态的近期发现） |
 | 分组条目的 `summary` | ≤ 180 字符（full 条目 ≤ 280） |
 | 分组条目的 `finding` / `decision` | ≤ 500 字符（仅 full 条目才有） |
 | `recent_changes` 的 summary | ≤ 240 字符 |
-| `details_md` | **从不包含**在 context 中 |
+| `rationale` / `details_md` / 完整 `evidence` | 当前 context **不包含**；用 `node` 补读 |
 
 整条记录放不下时会被省略：`truncated` 可能为 `true`，`omitted_counts`
 按组给出未返回条数，`continuations` 给出真正能补读的命令，`warnings`
@@ -266,8 +276,8 @@ rmcli create-project "名称" "目标文本"      # 内联简写
 ## 5. 导出
 
 `export <PID> [--out file.json]`（或 `--output`）。返回完整逻辑档案：
-`schema_version` 1、导出时的 `project_revision`、全部节点/关联（**含
-归档**）、完整提交历史（含 `operations`/`changes`）。`--out` 把档案写
+`schema_version` 3、导出时的 `project_revision`、全部节点/关联（**含
+归档**）、科研版本及节点归属、附件元数据、完整提交历史（含 `operations`/`changes`）。附件字节在备份包中，不在 JSON 中。`--out` 把档案写
 到磁盘并在 stdout 输出一个小 JSON 回执（file/bytes/revision/counts）。
 导出是便携档案，不是导入格式（v0.1 不做 JSON 导入）。
 
@@ -319,8 +329,8 @@ v0.1 **没有**项目级门禁。本机请求边界检查可返回 403 `LOCAL_AC
 
 ## 8. 会话心法（SPEC §8 的速记）
 
-1. **先读后写**：动笔前 `context --focus <你续做的节点>`，并核对同分支
-   的失败条件。
+1. **先读全局，再读局部**：先看目标与一级路线，再 `context --focus <你续做的节点>`，
+   用 `node` 补读路线、动机与证据，核对同分支失败条件。
 2. **小步提交**：一个独立研究增量 = 一个 commit；`summary` 要让人读得懂
    "研究上发生了什么变化"，而不是"agent 做了什么动作"。
 3. **失败也是资料**：`not_supported`/`inconclusive` 的尝试要带
@@ -328,6 +338,7 @@ v0.1 **没有**项目级门禁。本机请求边界检查可返回 403 `LOCAL_AC
    程序出错记 `inconclusive`，不要顺手标红。
 4. **冲突是协作**：`REVISION_CONFLICT` 说明有人（人或 AI）先写了。重读、
    再决定；绝不自动刷新版本硬闯。
-5. **不动别人的分支**：只改与你任务相关的分支；移动/重排他人分支需先征得
-   研究员同意。
-6. **交接用 export**：会话结束前 `export <PID> --out handoff-<revision>.json`。
+5. **按授权维护路线**：只改任务相关内容；有影响路线判断的新认识时同步相关综述。
+   未授权的结构重排先取得研究员同意；已有整理授权无需逐节点重复确认。
+6. **先解释研究，再给追溯材料**：交接当前路线、新增认识、路线影响和下一步，
+   明确未执行或未核验部分；会话结束前 `export <PID> --out handoff-<revision>.json`。

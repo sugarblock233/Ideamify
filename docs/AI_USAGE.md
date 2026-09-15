@@ -13,6 +13,18 @@ conflict rules as the web UI. All quoted sample data in this repo is synthetic.
 
 ---
 
+## 0. Organize the research before using the write protocol
+
+Read the [research authoring guide](RESEARCH_AUTHORING.md) first. It works with the current version and explains how to establish routes, divide them into subquestions and deepen the research with reasons and evidence. This document defines the HTTP/CLI contract.
+
+Read the objective and global routes before focusing on a question. Write titles and summaries for someone who did not run the experiments. Explain motivation, observations and the next step; put code detail in the body and evidence. Code alone means implementation, not confirmed execution or experimental results.
+
+Draft routes before initial mapping; reuse a reasonable existing structure when continuing. When new understanding affects a route, update its relevant summary/decision within the authorized scope. The tree expresses ownership; content and reasoned relations explain research continuity. Statuses never propagate automatically to ancestors.
+
+Current `context` omits rationale, details_md and full evidence. Use `node` to read the focus, route and key sources. Explicitly record the revision you read, dry-run, commit and read back. Hand off the current route, new understanding, its effect and the next question.
+
+The [redesign handoff, in Chinese](RESEARCH_MAP_REDESIGN.zh-CN.md) specifies future UI and context additions. Those additions are not implemented and are not part of the current API contract.
+
 ## 1. Setup
 
 ### 1.1 Environment (the only credential channel)
@@ -97,10 +109,10 @@ trusted space (SPEC §9). Do not expect per-project 403s; they do not exist.
 character budget** (`--max-chars`, 4000–50000, default 12000; the server
 counts the compact JSON of the response, not tokens) in fixed priority
 order: project objective and focus/ancestor skeleton (id + title, always
-complete) → focus node fields → direct relations (contradictions and
+complete) → keyword hits (when `--q` is supplied) → focus node fields → direct relations (contradictions and
 dependencies first) → prior `not_supported`/`inconclusive` records on the
 same branch → open child nodes → (without focus) routes, open nodes, recent
-findings → keyword hits (`--q`) → recent commits.
+findings → recent commits.
 
 **Group the reads, then verify**: before committing, note down
 `project_revision` (your `expected_revision` baseline) and the exact node
@@ -113,14 +125,13 @@ shortened with a `…[截断]` marker and `truncated` set to `true`):
 
 | Where | Cap |
 |---|---|
-| focus node `scope` / `summary` / `finding` / `decision` | ≤ 500 chars each; if even that does not fit, the field is **dropped** (not a half-sentence) |
-| focus node `tags` (joined) | ≤ 120 chars |
+| focus node `scope` / `summary` / `finding` / `decision` / joined `tags` | Up to 500 chars; under budget pressure, tries 300/160/60, then **drops** the field if none fits. Shortened text carries a truncation marker |
 | relation `reason` (in `related_nodes`) | ≤ 240 chars |
 | brief entries in groups (`scope`) | ≤ 160 chars (≤ 300 in "full" entries: `related_nodes`, `prior_attempts`, `matched`, recent findings with red/green status) |
 | brief entries (`summary`) | ≤ 180 chars (≤ 280 in full entries) |
 | brief entries (`finding` / `decision`) | ≤ 500 chars (only present in full entries) |
 | `recent_changes` summaries | ≤ 240 chars |
-| `details_md` | **never included** in context |
+| `rationale` / `details_md` / full `evidence` | **not included** in current context; read with `node` |
 
 When whole records don't fit, they are omitted: `truncated` may be `true`,
 `omitted_counts` names how many per group, `continuations` lists concrete
@@ -295,9 +306,10 @@ safely replayable.
 ## 5. Export
 
 `export <PID> [--out file.json]` (or `--output`). Returns the complete
-logical archive: `schema_version` 1, `project_revision` at export time,
-all nodes/relations **including archived**, and full commit history with
-`operations`/`changes`. `--out` writes the archive to disk and prints a
+logical archive: `schema_version` 3, `project_revision` at export time,
+all nodes/relations **including archived**, research versions and assignments,
+attachment metadata, and full commit history with `operations`/`changes`.
+Attachment bytes belong to the backup bundle, not the JSON. `--out` writes the archive to disk and prints a
 small JSON receipt (file/bytes/revision/counts) on stdout. The export is a
 portable archive, not an import format (v0.1 has no JSON import).
 
@@ -353,8 +365,9 @@ different server or a re-created project, first confirm ids exist via
 
 ## 8. Session etiquette (SPEC §8 in one paragraph each)
 
-1. **Read before writing**: `context --focus <node you continue>` and check
-   failed conditions on the same branch before proposing changes.
+1. **Read globally, then locally**: read the objective and routes, then
+   `context --focus <node you continue>`. Use `node` for route content,
+   motivation and evidence; check failed conditions on the same branch.
 2. **Commit small**: one independent research delta = one commit;
    `summary` should read as a research increment a human understands
    ("what changed", not "what the agent did").
@@ -364,7 +377,11 @@ different server or a re-created project, first confirm ids exist via
 4. **Conflicts are collaboration**: `REVISION_CONFLICT` means someone (human
    or AI) wrote first. Re-read, then decide; never auto-refresh to force
    through.
-5. **Stay in your lane**: only touch branches your task needs; moving or
-   reordering other people's branches needs the researcher's agreement.
-6. **Hand off with an export** before ending a session:
+5. **Maintain routes within the authorized scope**: update relevant route
+   summaries when understanding changes. Get agreement for structural changes
+   outside that scope; existing organization authorization needs no repeated
+   node-by-node confirmation.
+6. **Explain the research before supplying traceability material**: hand off
+   the route, new understanding, its effect and the next question; identify
+   unexecuted or unverified work. Before ending, also run
    `export <PID> --out handoff-<revision>.json`.

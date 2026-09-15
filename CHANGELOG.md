@@ -8,6 +8,15 @@ migration steps will be noted here.
 
 ### Added
 
+- A research map redesign handoff covering the proposed overview, route
+  reader, evidence presentation, implementation stages and acceptance tasks.
+  This is design documentation; the proposed UI and API additions are not
+  implemented in this documentation batch.
+- English and Chinese research authoring guides: establish routes before
+  subquestions, explain research continuity, distinguish code from execution
+  and evidence, maintain route summaries, and preserve existing research.
+  Getting-started guides and AI handoff instructions now teach this workflow.
+
 - Refreshed the visual system across the project dashboard and research
   workspace: dark utility navigation, warm paper canvas, clearer status
   accents, softer cards, and improved panel hierarchy while preserving the
@@ -107,6 +116,10 @@ migration steps will be noted here.
   gate for red/green statuses.
 
 ### Fixed
+
+- AI protocol documentation now reflects the current export schema version
+  (3), keyword priority in budgeted context, and the need to read full nodes
+  for rationale and evidence.
 
 - Detail-panel content now follows live sidebar resizing without fixed-width
   form controls or evidence rows causing horizontal overflow.

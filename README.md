@@ -68,8 +68,14 @@ Create a project, search by name/objective, or sort by latest update and open
 any project card. Use **‹ ResearchMap** in a map to return to the manager. Choose **+ 一级路线** to add a route, then select a node and choose
 **+ 子节点** to record an attempt or follow-up.
 
-Follow [your first research cycle](docs/GETTING_STARTED.md) for a complete
-walkthrough, including handing the record to an AI session.
+Follow [build your first research route map](docs/GETTING_STARTED.md) for a complete
+walkthrough, including handing the research to an AI session.
+
+Give a content-organizing AI the [research authoring guide](docs/RESEARCH_AUTHORING.md):
+establish routes, divide them into questions, and explain the purpose and basis
+of each step. Distinguish code, execution and conclusions. Top-level summaries
+should be understandable without having run the experiments. This writing
+method works with the current app.
 
 ## Keep using it
 
@@ -89,6 +95,7 @@ early release; `main` also includes subsequent fixes listed in the
 ## Project resources
 
 - [Documentation](docs/README.md): user guides, AI protocol and technical design
+- [Research map redesign handoff, in Chinese](docs/RESEARCH_MAP_REDESIGN.zh-CN.md): proposed overview, route reading, evidence presentation and acceptance criteria; not current features
 - [Contributing](CONTRIBUTING.md): development setup, checks and pull requests
 - [Report a bug](https://github.com/sugarblock233/Ideamify/issues/new?template=bug_report.yml) or [ask a question](https://github.com/sugarblock233/Ideamify/discussions) in English or Chinese
 - [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [MIT license](LICENSE)
