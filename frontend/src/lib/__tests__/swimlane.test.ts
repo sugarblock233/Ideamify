@@ -7,13 +7,16 @@ import { describe, expect, it } from "vitest";
 import {
   cardsOverlap,
   computeSwimlane,
+  DRAFT_H,
+  DRAFT_W,
   rootIdOf,
   SWIM_CELL_STEP,
+  SWIM_HEADER_GAP,
   SWIM_INSTANCE_SEP,
+  swimlaneDraftPlacement,
 } from "../layout";
 import { VERSION_FILTER_UNASSIGNED } from "../versionFilter";
 import type { GraphNode, ResearchVersion } from "../types";
-
 function node(
   id: string,
   parent_id: string | null,
@@ -199,6 +202,53 @@ describe("computeSwimlane", () => {
     for (const n of ns) expect(r.positions.has(n.id)).toBe(true);
     // 3 nodes + 4 extra (2 shared × 2nd lane each... s1,s2 both have 2 lanes → 1 extra each)
     expect(r.positions.size).toBe(ns.length + 2);
+  });
+});
+
+/* ---- F05: the create-draft needs a visible spot on the swimlane grid ---- */
+
+describe("swimlaneDraftPlacement (F05)", () => {
+  const unassignedX = (r: ReturnType<typeof draw>) =>
+    r.swimlane!.cols.find((c) => c.key === VERSION_FILTER_UNASSIGNED)!.x;
+
+  it("empty grid: deterministic spot at the 未分配 origin (header band floor)", () => {
+    const s1 = swimlaneDraftPlacement(new Map(), null, 0);
+    const s2 = swimlaneDraftPlacement(new Map(), null, 0);
+    expect(s1.x).toBe(0); // the only column sits at x=0 before any versions exist
+    expect(s1.y).toBeGreaterThanOrEqual(SWIM_HEADER_GAP);
+    expect(JSON.stringify(s1)).toBe(JSON.stringify(s2));
+  });
+
+  it("top-level draft: 未分配 column, below the deepest grid card", () => {
+    const r = draw();
+    const bottom = Math.max(...[...r.positions.values()].map((p) => p.y + p.height));
+    const s = swimlaneDraftPlacement(r.positions, null, unassignedX(r));
+    expect(s.x).toBe(unassignedX(r)); // a new route has no version yet
+    expect(s.y).toBeGreaterThanOrEqual(bottom);
+    // clear of every placed card
+    for (const pos of r.positions.values())
+      expect(
+        s.x < pos.x + pos.width && pos.x < s.x + DRAFT_W &&
+        s.y < pos.y + pos.height && pos.y < s.y + DRAFT_H,
+      ).toBe(false);
+  });
+
+  it("child draft: one cell step below its parent's primary instance", () => {
+    const r = draw();
+    const parent = r.positions.get("a")!;
+    const s = swimlaneDraftPlacement(r.positions, "a", unassignedX(r));
+    expect(s.anchorId).toBe("a");
+    expect(s.x).toBe(parent.x);
+    expect(s.y).toBeGreaterThanOrEqual(parent.y + SWIM_CELL_STEP);
+  });
+
+  it("child draft with the parent off-grid falls back to the 未分配 dock", () => {
+    const r = draw();
+    const sTop = swimlaneDraftPlacement(r.positions, null, unassignedX(r));
+    const s = swimlaneDraftPlacement(r.positions, "ghost", unassignedX(r));
+    expect(s.anchorId).toBe("");
+    expect(s.x).toBe(sTop.x);
+    expect(s.y).toBeGreaterThanOrEqual(sTop.y);
   });
 });
 

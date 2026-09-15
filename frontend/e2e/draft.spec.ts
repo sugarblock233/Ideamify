@@ -9,11 +9,9 @@
  *    重存成功；
  *  - F03：保存成功但回执丢失（合成 503）→ 重试重放冻结的完整请求体收束；
  *    冻结期的新编辑作为后续 node.update 提交；
+ *  - F05：空项目、空筛选结果、泳道上的新建草稿也有画布卡位（不依赖正式
+ *    节点已存在），保存前可见可编辑，保存/取消后清理；
  *  - 编辑草稿的节点卡片带 未保存 徽标（§10.2）。
- *
- *  注意：空图不渲染虚拟根卡（layout 在 0 节点时为空），画布草稿卡也无处安
- *  放（draftPlacement 返回 null，编辑走侧栏）——涉及画布卡的用例先播种一级
- *  节点。
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -309,4 +307,138 @@ test("F03: 保存成功但回执丢失——重放冻结请求收束，冻结期
   const node = (await api(page, "GET", `/api/v1/projects/${pid}/nodes/${nid}`)).json;
   expect(node.summary).toBe("冻结期补写的摘要");
   await expect(page.locator(".hint.err", { hasText: "已被不同的提交内容" })).toHaveCount(0);
+});
+
+async function openViewMenu(page: Page) {
+  await page.getByTestId("view-toolbar").getByRole("button").nth(2).click();
+}
+
+test("F05: 空项目新建一级——草稿卡直接出现在画布上，可编辑可保存", async ({ page }) => {
+  const { pid } = await makeProject(page); // 不播种：真正的空图
+  await enterStudio(page, pid);
+  await expect(page.locator(".rm-card")).toHaveCount(0, { timeout: 20_000 });
+
+  await page.getByRole("button", { name: "+ 一级路线" }).click();
+  const panel = page.locator(".side");
+  await expect(panel.getByRole("heading", { name: /新增节点/ })).toBeVisible();
+  // 画布草稿卡不再依赖已有节点：空图上照样可见
+  await expect(page.locator(".rm-draft")).toHaveCount(1);
+  await page.locator(".rm-draft").scrollIntoViewIfNeeded();
+  await draftTitle(page).fill("空项目第一条路线");
+
+  await page.locator('[data-testid="draft-card-save"]').click();
+  await expect(page.locator(".rm-card", { hasText: "空项目第一条路线" })).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator(".rm-draft")).toHaveCount(0); // 保存后清理
+});
+
+test("F05: 空筛选结果新建一级——草稿仍在画布上，保存后进入筛选视图", async ({ page }) => {
+  const { pid, rev } = await makeProject(page);
+  const va = crypto.randomUUID();
+  const vb = crypto.randomUUID();
+  const seeded = await api(page, "POST", `/api/v1/projects/${pid}/commits`, {
+    request_id: crypto.randomUUID(),
+    expected_revision: rev,
+    client_label: "seed",
+    summary: "e2e 空筛选宿主",
+    operations: [
+      { op: "version.create", id: va, name: "第一轮", description: "" },
+      { op: "version.create", id: vb, name: "空轮", description: "没有任何成员" },
+      { op: "node.create", id: crypto.randomUUID(), parent_id: null, kind: "question",
+        title: "只属于第一轮", summary: "筛空轮时它应被隐藏", status: "in_progress", version_ids: [va] },
+    ],
+  });
+  expect(seeded.status, JSON.stringify(seeded.json)).toBe(200);
+  await enterStudio(page, pid);
+  await expect(page.locator(".rm-card", { hasText: "只属于第一轮" })).toBeVisible({ timeout: 20_000 });
+
+  // 筛选没有任何成员的版本 → 画布空
+  await openViewMenu(page);
+  await page.getByTestId(`vt-version-${vb.slice(0, 8)}`).click();
+  await expect(page.locator(".rm-card")).toHaveCount(0, { timeout: 20_000 });
+
+  await page.getByRole("button", { name: "+ 一级路线" }).click();
+  await expect(page.locator(".rm-draft")).toHaveCount(1);
+  const panel = page.locator(".side");
+  // §7.2：筛选中的版本预填进草稿
+  await expect(panel.getByTestId(`ver-chip-${vb.slice(0, 8)}`)).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".rm-draft").scrollIntoViewIfNeeded();
+  await draftTitle(page).fill("空轮里的新路线");
+
+  await page.locator('[data-testid="draft-card-save"]').click();
+  await expect(page.locator(".rm-card", { hasText: "空轮里的新路线" })).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator(".rm-draft")).toHaveCount(0);
+});
+
+test("F05: 泳道新建一级与子节点——草稿可见可编辑，保存后成卡", async ({ page }) => {
+  const { pid, rev } = await makeProject(page);
+  const va = crypto.randomUUID();
+  const nid = crypto.randomUUID();
+  const seeded = await api(page, "POST", `/api/v1/projects/${pid}/commits`, {
+    request_id: crypto.randomUUID(),
+    expected_revision: rev,
+    client_label: "seed",
+    summary: "e2e 泳道草稿宿主",
+    operations: [
+      { op: "version.create", id: va, name: "第一轮", description: "" },
+      { op: "node.create", id: nid, parent_id: null, kind: "question",
+        title: "泳道宿主路线", summary: "一级", status: "in_progress", version_ids: [va] },
+    ],
+  });
+  expect(seeded.status, JSON.stringify(seeded.json)).toBe(200);
+  await enterStudio(page, pid);
+  await expect(page.locator(".rm-card", { hasText: "泳道宿主路线" })).toBeVisible({ timeout: 20_000 });
+
+  await openViewMenu(page);
+  await page.getByTestId("vt-layout-swimlane").click();
+  await expect(page.getByTestId("swimlane-headers")).toBeVisible();
+
+  // 一级草稿：泳道没有虚拟根，落位在「未分配」列网格下方
+  await page.getByRole("button", { name: "+ 一级路线" }).click();
+  await expect(page.locator(".rm-draft")).toHaveCount(1);
+  const spot = await page.locator(".rm-draft").boundingBox();
+  expect(spot).not.toBeNull();
+  const heads = page.getByTestId("swimlane-headers");
+  await expect(heads.locator(".swim-col")).toHaveText(["第一轮", "未分配"]);
+  const col = heads.locator(".swim-col", { hasText: "未分配" });
+  const colBox = await col.boundingBox();
+  expect(Math.abs(spot!.x - colBox!.x)).toBeLessThan(80); // 与列头同 x 起点
+  await draftTitle(page).fill("泳道新增的一级路线");
+
+  // 取消后再走子节点草稿（同屏验完取消清理）。撤销点在网格正下方，可能与
+  // 缩略图重叠：dispatchEvent 直接触发 React 回调，绕开命中遮挡。
+  await page.locator('[data-testid="draft-card-cancel"]').dispatchEvent("click");
+  await expect(page.locator(".rm-draft")).toHaveCount(0);
+
+  // 子节点草稿：锚定宿主路线的泳道实例
+  await page.locator(".rm-card", { hasText: "泳道宿主路线" }).first().click();
+  await page.getByRole("button", { name: "+ 子节点", exact: true }).click();
+  await expect(page.locator(".rm-draft")).toHaveCount(1);
+  await expect(page.locator(".side").getByTestId("draft-pathline")).toContainText("泳道宿主路线");
+  await page.locator(".rm-draft").scrollIntoViewIfNeeded();
+  await draftTitle(page).fill("泳道新增的子节点");
+
+  // 同上：子草稿卡可能落在缩略图下层
+  await page.locator('[data-testid="draft-card-save"]').dispatchEvent("click");
+  await expect(page.locator(".rm-card", { hasText: "泳道新增的子节点" })).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator(".rm-draft")).toHaveCount(0);
+});
+
+test("F05: 横/纵树的子节点草稿照旧可见可编辑", async ({ page }) => {
+  const { pid, rev } = await makeProject(page);
+  await seedRoute(page, pid, rev, "树模式宿主九");
+  await enterStudio(page, pid);
+  await page.waitForSelector(".rm-card");
+
+  for (const layout of [{ id: "vt-layout-h", label: "横" }, { id: "vt-layout-v", label: "纵" }]) {
+    await openViewMenu(page);
+    await page.getByTestId(layout.id).click();
+    await page.locator(".rm-card", { hasText: "树模式宿主九" }).first().click();
+    await page.getByRole("button", { name: "+ 子节点", exact: true }).click();
+    await expect(page.locator(".rm-draft")).toHaveCount(1);
+    await page.locator(".rm-draft").scrollIntoViewIfNeeded();
+    await draftTitle(page).fill(`${layout.label}树子节点草稿`);
+    await page.locator('[data-testid="draft-card-save"]').click();
+    await expect(page.locator(".rm-card", { hasText: `${layout.label}树子节点草稿` })).toHaveCount(1, { timeout: 15_000 });
+    await expect(page.locator(".rm-draft")).toHaveCount(0);
+  }
 });

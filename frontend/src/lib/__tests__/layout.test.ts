@@ -21,7 +21,8 @@ import {
   rootIdOf,
   type LayoutMode,
   type PlacedNode,
-} from "../layout";import type { GraphNode, NodeKind, NodeStatus } from "../types";
+} from "../layout";
+import type { GraphNode, NodeKind, NodeStatus } from "../types";
 
 const PID = "p1";
 
@@ -278,5 +279,14 @@ describe.each<LayoutMode>(["h", "v"])("draftPlacement ×%s (C3)", (mode) => {
     const s1 = draftPlacement(positions, "b", anc, rootId, mode as "h" | "v", tops);
     const s2 = draftPlacement(positions, "b", anc, rootId, mode as "h" | "v", tops);
     expect(s1).toEqual(s2);
+  });
+
+  it("empty canvas (F05): deterministic origin where the first root card lands", () => {
+    const empty = new Map<string, PlacedNode>();
+    const s = draftPlacement(empty, null, () => [], rootId, mode as "h" | "v", [])!;
+    expect(s.x).toBe(-CARD_W / 2);
+    expect(s.y).toBe(-CARD_H / 2);
+    expect(draftPlacement(empty, "ghost", () => [], rootId, mode as "h" | "v", []))
+      .toEqual(s); // no parent cards either — same origin
   });
 });

@@ -25,7 +25,8 @@ import {
   type Edge,
   type Node,
 } from "@xyflow/react";
-import { computeLayout, computeSwimlane, draftPlacement, CARD_W, CARD_H, DRAFT_W, DRAFT_H, rootIdOf, type LayoutResult } from "../lib/layout";
+import { computeLayout, computeSwimlane, draftPlacement, swimlaneDraftPlacement, CARD_W, CARD_H, DRAFT_W, DRAFT_H, rootIdOf, type LayoutResult } from "../lib/layout";
+import { VERSION_FILTER_UNASSIGNED } from "../lib/versionFilter";
 import { STATUS_COLOR, STATUS_GLYPH } from "../lib/format";
 import { resolveTier, type DetailTier } from "../lib/detailLevel";
 import type { DensityMode, LayoutMode } from "../lib/viewPrefs";
@@ -299,7 +300,9 @@ function Inner(p: CanvasProps) {
     // its parent (or its parent's nearest visible ancestor when folded away),
     // so it never perturbs layout coordinates, and the draft disappears with
     // the session whether it is saved (becomes a real card) or cancelled.
-    if (p.nodeDraft && layout.positions.size > 0) {
+    // F05: also on an empty canvas (new project, empty filter) and on the
+    // swimlane grid, where a top-level draft docks in the 「未分配」 column.
+    if (p.nodeDraft) {
       const byId = new Map(p.graph.map((g) => [g.id, g]));
       const ancestorsOf = (id: string): string[] => {
         const chain: string[] = [];
@@ -319,7 +322,14 @@ function Inner(p: CanvasProps) {
         .sort((a, b) => a.order_index - b.order_index || a.id.localeCompare(b.id))
         .map((n) => ({ x: layout.positions.get(n.id)?.x ?? 0, y: layout.positions.get(n.id)?.y ?? 0 }))
         .filter((pt) => pt.x || pt.y || layout.positions.size === 1);
-      const spot = draftPlacement(layout.positions, p.nodeDraft.parentId, ancestorsOf, rootId, treeMode, tops);
+      const spot =
+        p.mode === "swimlane"
+          ? swimlaneDraftPlacement(
+              layout.positions,
+              p.nodeDraft.parentId,
+              layout.swimlane?.cols.find((c) => c.key === VERSION_FILTER_UNASSIGNED)?.x ?? 0,
+            )
+          : draftPlacement(layout.positions, p.nodeDraft.parentId, ancestorsOf, rootId, treeMode, tops);
       if (spot) {
         out.push({
           id: p.nodeDraft.id,

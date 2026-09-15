@@ -464,8 +464,10 @@ export interface DraftPlacement {
  *  - Overlaps walk down (h) / right (v) in 12px steps until the draft rect is
  *    clear of every placed card. Same (positions, parentId) ⇒ same spot.
  *
- *  Returns null on an empty canvas — there is nothing to dock to yet; callers
- *  render the draft only in the side panel in that case. */
+ *  F05: an empty canvas (new project / empty filter) or a parent outside the
+ *  current view no longer hides the draft — it docks at the deterministic
+ *  origin where the first root card would land and the clear walk still
+ *  applies, so it is visible and editable before the first save. */
 export function draftPlacement(
   positions: Map<string, PlacedNode>,
   parentId: string | null,
@@ -475,7 +477,6 @@ export function draftPlacement(
   mode: "h" | "v",
   tops: { x: number; y: number }[],
 ): DraftPlacement | null {
-  if (positions.size === 0) return null;
   let anchor: PlacedNode | undefined;
   if (parentId) {
     anchor = positions.get(parentId);
@@ -487,7 +488,6 @@ export function draftPlacement(
     }
   }
   if (!anchor) anchor = positions.get(rootId);
-  if (!anchor) return null; // anchor card not on canvas; nothing to dock to
   // tops ordered like the tree (caller sorts); "last" = farthest on the
   // sibling axis, which for both orientations is the max canvas coordinate.
   const lastTop =
@@ -497,14 +497,20 @@ export function draftPlacement(
 
   let x: number;
   let y: number;
-  if (parentId) {
+  if (parentId && anchor) {
     // 96 ≈ the h groove (380 − 280) minus a nudge; keeps the draft visually
     // inside the parent's column airspace instead of hugging the next column.
     x = mode === "v" ? anchor.x : anchor.x + CARD_W + 96;
     y = mode === "v" ? anchor.y + CARD_H + 96 : anchor.y;
-  } else {
+  } else if (anchor) {
     x = mode === "v" ? lastTop.x + CARD_W + 96 : lastTop.x;
     y = mode === "v" ? lastTop.y : lastTop.y + CARD_H + 96;
+  } else {
+    // F05: nothing on canvas to dock to — origin = where the first root card
+    // lands (both tree strategies map d3 (0,0) here), so the saved card takes
+    // the draft's exact spot.
+    x = -CARD_W / 2;
+    y = -CARD_H / 2;
   }
   const clear = (): boolean => {
     for (const pos of positions.values()) {
@@ -528,10 +534,53 @@ export function draftPlacement(
   return {
     x,
     y,
-    anchorId: parentId
-      ? anchor.id === rootId
-        ? rootId
-        : anchor.id
-      : rootId,
+    anchorId: anchor ? anchor.id : rootId,
+  };
+}
+
+/** F05: draft spot on the swimlane grid. Columns, not tree depth, rule here:
+ *  a child draft docks one cell below its parent's (primary) instance; a
+ *  top-level draft lands in the 「未分配」 column below the grid — a new route
+ *  carries no version yet, and the next render's grid grows to include it.
+ *  Same bounded 12px clear walk as the tree modes; same inputs ⇒ same spot. */
+export function swimlaneDraftPlacement(
+  positions: Map<string, PlacedNode>,
+  parentId: string | null,
+  unassignedX: number,
+): DraftPlacement {
+  let bottom = SWIM_HEADER_GAP;
+  for (const pos of positions.values()) bottom = Math.max(bottom, pos.y + pos.height);
+  let x = unassignedX;
+  let y = bottom + SWIM_ROW_GAP;
+  const anchor = parentId ? positions.get(parentId) : undefined;
+  if (anchor) {
+    // parent's row below its cell stack; the stack grows by one, this is the
+    // next slot — the clear walk below handles collisions anyway.
+    x = anchor.x;
+    y = anchor.y + SWIM_CELL_STEP;
+  }
+  for (let i = 0; i < 240; i++) {
+    let hit = false;
+    for (const pos of positions.values()) {
+      if (
+        x < pos.x + pos.width &&
+        pos.x < x + DRAFT_W &&
+        y < pos.y + pos.height &&
+        pos.y < y + DRAFT_H
+      ) {
+        hit = true;
+        break;
+      }
+    }
+    if (!hit) break;
+    y += 12;
+  }
+  return {
+    x,
+    y,
+    // primary swimlane instances keep the business id (F04), so a placed
+    // parent is directly addressable; "" = no dock target (top-level draft —
+    // the swimlane has no virtual root to hang a temp edge from).
+    anchorId: anchor ? anchor.id : "",
   };
 }
