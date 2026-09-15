@@ -30,7 +30,7 @@ import { VERSION_FILTER_UNASSIGNED } from "../lib/versionFilter";
 import { STATUS_COLOR, STATUS_GLYPH } from "../lib/format";
 import { resolveTier, type DetailTier } from "../lib/detailLevel";
 import type { DensityMode, LayoutMode } from "../lib/viewPrefs";
-import type { GraphNode, NodeStatus, Project, RelationItem, ResearchVersion } from "../lib/types";
+import type { GraphNode, NodeKind, NodeStatus, Project, RelationItem, ResearchVersion } from "../lib/types";
 import { selectCanvasRelations } from "../lib/relations";
 import { NodeCard, type CardData } from "./NodeCard";
 import { RootCard, type RootData } from "./RootCard";
@@ -111,6 +111,10 @@ export interface CanvasProps {
   /** C3 §10.2: the node currently carrying an unsaved edit draft (selected +
    *  dirty) → its card shows a 未保存 badge while the panel holds the draft. */
   unsavedId: string | null;
+  /** F06: live content preview for the node under an edit draft — the card
+   *  renders the draft's title/summary/kind/status before anything is saved.
+   *  Layout never reads it: coordinates stay frozen for text-only edits. */
+  editPreview: { id: string; title: string; summary: string; kind: NodeKind; status: NodeStatus } | null;
   onDraftFields: (patch: Partial<Draft>) => void;
   onDraftSave: () => void;
   onDraftCancel: () => void;
@@ -252,6 +256,7 @@ function Inner(p: CanvasProps) {
           shared: sharedLabel,
           badgeCount: p.marks.badges.get(n.id),
           unsaved: n.id === p.unsavedId,
+          preview: p.editPreview && p.editPreview.id === n.id ? p.editPreview : undefined,
           tier,
           low: p.lowInterference,
           v: treeMode === "v",
@@ -286,6 +291,7 @@ function Inner(p: CanvasProps) {
             shared: laneVersionNames(n, vers),
             badgeCount: p.marks.badges.get(n.id),
             unsaved: n.id === p.unsavedId,
+            preview: p.editPreview && p.editPreview.id === n.id ? p.editPreview : undefined,
             tier,
             low: p.lowInterference,
             v: treeMode === "v",
@@ -355,7 +361,7 @@ function Inner(p: CanvasProps) {
     return out;
     // structKey covers graph/folds/branchRoot; marks/relations refresh data
     // without needing structural bookkeeping.
-  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, p.unsavedId, onToggleFold, onCtx, tier, p.lowInterference, treeMode, p.nodeDraft, p.branchRoot, p.onDraftFields, p.onDraftSave, p.onDraftCancel]);
+  }, [layout, p.graph, p.folds, p.marks, p.project, p.selectedId, p.unsavedId, p.editPreview, onToggleFold, onCtx, tier, p.lowInterference, treeMode, p.nodeDraft, p.branchRoot, p.onDraftFields, p.onDraftSave, p.onDraftCancel]);
 
   // Selected node's direct relations eligible for canvas lines (≤ MAX_CANVAS_RELATION).
   const shownRels = useMemo(() => {

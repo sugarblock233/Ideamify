@@ -11,7 +11,8 @@
  *    冻结期的新编辑作为后续 node.update 提交；
  *  - F05：空项目、空筛选结果、泳道上的新建草稿也有画布卡位（不依赖正式
  *    节点已存在），保存前可见可编辑，保存/取消后清理；
- *  - 编辑草稿的节点卡片带 未保存 徽标（§10.2）。
+ *  - F06：编辑草稿中的卡片即时预览草稿（标题/摘要/状态），纯文本编辑
+ *    不触发重排；保存后消失 未保存 徽标（§10.2）。
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -244,7 +245,7 @@ test("409 与断网：草稿保留、错误可见，恢复后重存成功", asyn
   await expect(page.locator(".rm-card", { hasText: "断网也要保住的路线" })).toHaveCount(1, { timeout: 15_000 });
 });
 
-test("编辑草稿的节点卡片带 未保存 徽标（§10.2），保存后消失", async ({ page }) => {
+test("F06: 编辑草稿的卡片即时预览草稿内容；纯文本编辑不触发重排", async ({ page }) => {
   const { pid, rev } = await makeProject(page);
   const nid = crypto.randomUUID();
   const seeded = await api(page, "POST", `/api/v1/projects/${pid}/commits`, {
@@ -261,14 +262,32 @@ test("编辑草稿的节点卡片带 未保存 徽标（§10.2），保存后消
   await enterStudio(page, pid);
   await page.waitForSelector(".rm-card", { timeout: 20_000 });
 
-  await page.locator(".rm-card", { hasText: "待编辑路线" }).first().click();
+  const card = page.locator(".rm-card", { hasText: "待编辑路线" }).first();
+  await card.click();
+  const before = await card.boundingBox();
   await page.getByRole("button", { name: "编辑" }).click();
+
+  // 即时预览：摘要、标题落到卡片
   await page.locator("textarea").first().fill("改到一半的摘要");
-  await expect(page.locator(".rm-card", { hasText: "待编辑路线" }).first().locator(".unsaved-badge")).toHaveText("未保存");
+  await expect(page.locator(".rm-card", { hasText: "改到一半的摘要" })).toHaveCount(1);
+  await expect(page.locator(".rm-card", { hasText: "改到一半的摘要" }).locator(".unsaved-badge")).toHaveText("未保存");
+  await page.locator(".editform input").first().fill("改到一半的标题");
+  await expect(page.locator(".rm-card", { hasText: "改到一半的标题" })).toHaveCount(1);
+  // 状态预览：切到 有积极迹象，卡片状态药片跟随
+  await page.locator(".editform select").nth(1).selectOption({ label: "有积极迹象" });
+  await expect(page.locator(".rm-card", { hasText: "改到一半的标题" }).locator(".status-pill")).toContainText("有积极迹象");
+
+  // 纯文本改动不动坐标：布局坐标与文本无关（预览只改卡片内容）
+  const previewed = page.locator(".rm-card", { hasText: "改到一半的标题" });
+  const after = await previewed.boundingBox();
+  expect(after!.x).toBeCloseTo(before!.x, 0);
+  expect(after!.y).toBeCloseTo(before!.y, 0);
 
   await page.getByRole("button", { name: "保存" }).click();
   await expect(page.getByRole("button", { name: "保存" })).toBeDisabled({ timeout: 10_000 });
   await expect(page.locator(".unsaved-badge")).toHaveCount(0);
+  // 保存后卡片显示落库内容
+  await expect(page.locator(".rm-card", { hasText: "改到一半的标题" })).toBeVisible();
 });
 
 test("F03: 保存成功但回执丢失——重放冻结请求收束，冻结期新编辑成后续修改", async ({ page }) => {

@@ -1335,6 +1335,12 @@ async function rebaseDraft() {
                 }
               : null}
             unsavedId={dirty && !nodeDraft ? selectedId : null}
+            editPreview={
+              dirty && draft && !nodeDraft && selectedId
+                ? { id: selectedId, title: draft.title, summary: draft.summary,
+                    kind: draft.kind, status: draft.status }
+                : null
+            }
             onDraftFields={patchNodeDraftFields}
             onDraftSave={() => void commitNodeDraft()}
             onDraftCancel={cancelNodeDraft}

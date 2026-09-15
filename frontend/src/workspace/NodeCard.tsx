@@ -15,7 +15,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { CARD_W, CARD_H } from "../lib/layout";
 import { STATUS_COLOR, STATUS_GLYPH, kindLabel, statusLabel } from "../lib/format";
 import type { DetailTier } from "../lib/detailLevel";
-import type { GraphNode } from "../lib/types";
+import type { GraphNode, NodeKind, NodeStatus } from "../lib/types";
 import { useT } from "../lib/i18n";
 
 export interface CardData extends Record<string, unknown> {
@@ -28,6 +28,10 @@ export interface CardData extends Record<string, unknown> {
    *  未保存 flag on the card itself, so the live-edit state is visible on the
    *  map and not only in the panel. */
   unsaved?: boolean;
+  /** F06: live preview of an in-flight edit draft — the card renders these
+   *  draft values instead of the saved ones until save/cancel. Display only:
+   *  layout keeps its coordinates (text-only edits never re-layout). */
+  preview?: { title: string; summary: string; kind: NodeKind; status: NodeStatus };
   /** F04: swimlane shared-set badge — " v1 · v2" on a node assigned to more
    *  than one research version; every display instance shows it. */
   shared?: string;
@@ -45,16 +49,24 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
   const t = useT();
   const d = props.data as CardData;
   const n = d.node;
+  // F06: while an edit draft is open, the card mirrors the draft (kind/status
+  // pills and the text); saved values stay underneath for the title attr.
+  const shown = {
+    kind: d.preview?.kind ?? n.kind,
+    status: d.preview?.status ?? n.status,
+    title: d.preview ? d.preview.title : n.title,
+    summary: d.preview ? d.preview.summary : n.summary,
+  };
 
   return (
     <div
       className={`rm-card tier-${d.tier ?? "reading"} ${selected ? "selected" : ""}${n.archived ? " archived" : ""}${d.low ? " low-interf" : ""}`}
       style={
         {
-          borderLeftColor: STATUS_COLOR[n.status],
+          borderLeftColor: STATUS_COLOR[shown.status],
           width: CARD_W,
           height: CARD_H,
-          "--st": STATUS_COLOR[n.status],
+          "--st": STATUS_COLOR[shown.status],
         } as React.CSSProperties
       }
       onContextMenu={(e) => {
@@ -65,13 +77,13 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
       <Handle type="target" position={d.v ? Position.Top : Position.Left} isConnectable={false} style={{ opacity: 0 }} />
       <Handle type="source" position={d.v ? Position.Bottom : Position.Right} isConnectable={false} style={{ opacity: 0 }} />
       <div className="row1">
-        <span className="kind-badge">{kindLabel(n.kind)}</span>
+        <span className="kind-badge">{kindLabel(shown.kind)}</span>
         <span
           className="status-pill"
-          style={{ color: STATUS_COLOR[n.status], background: "rgba(0,0,0,0.03)" }}
+          style={{ color: STATUS_COLOR[shown.status], background: "rgba(0,0,0,0.03)" }}
         >
-          <span className="dot" style={{ background: STATUS_COLOR[n.status] }} />
-          {statusLabel(n.status)}
+          <span className="dot" style={{ background: STATUS_COLOR[shown.status] }} />
+          {statusLabel(shown.status)}
         </span>
         {n.archived && <span className="arch-pill">{t("node.archived")}</span>}
         {d.shared && (
@@ -80,8 +92,8 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
           </span>
         )}
       </div>
-      <div className="title" title={n.title}>{n.title}</div>
-      <div className="summary" title={n.summary}>{n.summary || t("node.no.summary")}</div>
+      <div className="title" title={n.title}>{shown.title}</div>
+      <div className="summary" title={n.summary}>{shown.summary || t("node.no.summary")}</div>
       <div className="row3">
         <span>{t("node.children.count", { n: n.child_count })}</span>
         <span>{t("node.relations.count", { n: n.relation_count })}</span>
@@ -91,7 +103,7 @@ export const NodeCard = React.memo(function NodeCard(props: NodeProps) {
           ))}
         </span>
       </div>
-      <div className="tier-glyph" aria-hidden>{STATUS_GLYPH[n.status]}</div>
+      <div className="tier-glyph" aria-hidden>{STATUS_GLYPH[shown.status]}</div>
       {(d.mark === "new" || d.mark === "changed") && (
         <span className={d.mark === "new" ? "new-badge" : "update-badge"}>
           {d.mark === "new" ? t("node.mark.new") : t("node.mark.changed")}
