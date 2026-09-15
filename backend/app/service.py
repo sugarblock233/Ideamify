@@ -768,6 +768,25 @@ def op_version_update(plan: Plan, op: OpVersionUpdate, idx: int) -> None:
         v.name = upd["name"].strip()
     if "description" in upd and upd["description"] is not None:
         v.description = upd["description"]
+    if "after_id" in upd:
+        # 顺位调整（version.create 同语义）：null → 第一位；UUID → 在其后。
+        # 自身与未知参照各自报错；research_versions 无 order_index 唯一索引，
+        # 直接整轮重编号即可。
+        after = upd["after_id"]
+        rest = [x for x in _version_order(s, plan.project.id) if x.id != v.id]
+        if after is None:
+            pos = 0
+        else:
+            pos = next((i + 1 for i, x in enumerate(rest) if x.id == after), None)
+            if pos is None:
+                if s.get(ResearchVersion, after) is not None:
+                    raise invalid("after_id 不能是版本自身", code="AFTER_SELF",
+                                  operation_index=idx)
+                raise invalid(f"after_id {after} 不存在或不属于当前项目",
+                              code="INVALID_AFTER", operation_index=idx)
+        for i, item in enumerate(rest[:pos] + [v] + rest[pos:]):
+            item.order_index = i
+        s.flush()
     v.updated_at = now_utc()
     plan.changes.append({"type": "version.update", "object_id": v.id,
                          "before": before, "after": _version_snap(v)})

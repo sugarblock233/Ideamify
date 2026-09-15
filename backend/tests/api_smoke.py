@@ -866,6 +866,27 @@ r = commit_to(pv, ops_v, rev - 1)
 check("version commit stale revision -> 409 REVISION_CONFLICT",
       r.status_code == 409 and r.json()["error"]["code"] == "REVISION_CONFLICT", r.text[:200])
 
+# --- version.update after_id 顺位调整（管理 UI 的排序通道）---
+r = commit_to(pv, [{"op": "version.update", "id": v2, "fields": {"after_id": None}}], rev)
+rev += 1
+order = [x["id"] for x in c.get(f"/api/v1/projects/{pv}/graph").json()["versions"]]
+check("version.update after_id=null moves to front",
+      r.status_code == 200 and order == [v2, v1, v3], f"{order} {r.text[:150]}")
+r = commit_to(pv, [{"op": "version.update", "id": v2, "fields": {"after_id": v1}}], rev)
+rev += 1
+order = [x["id"] for x in c.get(f"/api/v1/projects/{pv}/graph").json()["versions"]]
+check("version.update after_id=uuid moves after target",
+      r.status_code == 200 and order == [v1, v2, v3], f"{order} {r.text[:150]}")
+r = commit_to(pv, [{"op": "version.update", "id": v2, "fields": {"after_id": v2}}], rev)
+check("version.update after_id=self -> 422 AFTER_SELF",
+      r.status_code == 422 and r.json()["error"]["code"] == "AFTER_SELF", r.text[:200])
+r = commit_to(pv, [{"op": "version.update", "id": v2, "fields": {"after_id": U()}}], rev)
+check("version.update unknown after_id -> 422 INVALID_AFTER",
+      r.status_code == 422 and r.json()["error"]["code"] == "INVALID_AFTER", r.text[:200])
+r = commit_to(pv, [{"op": "version.update", "id": v3, "fields": {"name": "x"}}], rev)
+check("version.update on archived version -> 422 VERSION_ARCHIVED",
+      r.status_code == 422 and r.json()["error"]["code"] == "VERSION_ARCHIVED", r.text[:200])
+
 ev = c.get(f"/api/v1/projects/{pv}/export").json()
 assigns = {(a["node_id"], a["version_id"]) for a in ev.get("node_version_assignments", [])}
 check("export v3 carries versions + node_version_assignments",
@@ -874,10 +895,10 @@ check("export v3 carries versions + node_version_assignments",
 
 ctx = c.get(f"/api/v1/projects/{pv}/context", params={"max_chars": 8000}).json()
 route = next((x for x in ctx.get("routes", []) if x["id"] == n_a), None)
-# 标签是展示序号（v1/v2/v3 = 版本顺序，非版本 id）：补录轮插在第一轮之后，
-# 第二轮顺延为第 3 位，n_a 归属第二轮 ⇒ 标签 "v3"。
+# 标签是展示序号（v1/v2/v3 = 版本顺序，非版本 id）：排序用例已把顺序调整为
+# [第一轮, 第二轮, 补录轮]，n_a 归属第二轮 ⇒ 标签 "v2"。
 check("context routes tag node with version label",
-      route is not None and route.get("versions") == "v3", str(ctx.get("routes"))[:200])
+      route is not None and route.get("versions") == "v2", str(ctx.get("routes"))[:200])
 
 c.close(); try_ai.close()
 fails = [n for n, okp in results if not okp]

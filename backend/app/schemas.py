@@ -291,6 +291,9 @@ class VersionCreate(StrictModel):
 class VersionUpdateFields(StrictModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=80)
     description: Optional[str] = Field(default=None, max_length=500)
+    # 顺位调整（version.create 同语义）：省略 → 不动；显式 null → 第一位；
+    # UUID → 移到该版本之后。归档版本仍拒绝整个 update。
+    after_id: Optional[NodeId] = Field(default=None)
 
     @field_validator("name")
     @classmethod
@@ -299,10 +302,19 @@ class VersionUpdateFields(StrictModel):
             raise ValueError("version.name 不能为空白")
         return v
 
+    @field_validator("after_id")
+    @classmethod
+    def _v_after(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _validate_uuid(v, "after_id")
+
+    @property
+    def after_id_set(self) -> bool:
+        return "after_id" in self.model_fields_set
+
     @model_validator(mode="after")
     def _not_empty(self):
         if not self.model_fields_set:
-            raise ValueError("version.update.fields 至少包含 name 或 description")
+            raise ValueError("version.update.fields 至少包含 name、description 或 after_id")
         return self
 
 
